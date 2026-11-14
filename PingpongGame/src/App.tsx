@@ -5,8 +5,8 @@ import type { Phase, Side } from './core/types.ts'
 import { GameRenderer } from './render/renderer.ts'
 import { PoseTracker, isVisible } from './input/poseTracker.ts'
 import type { MotionSource, PoseFrame } from './input/poseTracker.ts'
-import { SwingDetector, paddleTargetFromPose, pickArmSample } from './input/swingDetector.ts'
-import type { HandPreference } from './input/swingDetector.ts'
+import { SwingDetector, paddleTargetFromPose, pickArmSample, handOf, isMouseSwing } from './input/swingDetector.ts'
+import type { SwingSource } from './input/swingDetector.ts'
 import { KeyboardController } from './input/keyboard.ts'
 import { MouseController } from './input/mouse.ts'
 
@@ -76,7 +76,7 @@ interface HudState {
   /** 手臂运动是否被识别到（识别不到就永远触发不了挥拍） */
   armSeen: boolean
   /** 当前采样点：手腕 / 肘部（兜底） / 无 */
-  swingSource: MotionSource | null
+  armSource: MotionSource | null
   /** 体感模式下手臂的运动速度（肩宽 / 秒），实时反馈，便于调灵敏度 */
   swingSpeed: number
   /** 体感模式下手臂的垂直位移（肩宽），实时反馈 */
@@ -100,7 +100,7 @@ const INITIAL_HUD: HudState = {
   swingPower: 0,
   bodyPos: 0.5,
   armSeen: false,
-  swingSource: null,
+  armSource: null,
   swingSpeed: 0,
   swingVert: 0,
   gameOver: null,
@@ -117,15 +117,14 @@ export default function App() {
   const [timeScale, setTimeScale] = useState<number>(NORMAL_DEFAULT_TIME_SCALE)
   const [autoMove, setAutoMove] = useState(false)
   const [autoSwing, setAutoSwing] = useState(false)
-  /** 用哪只手挥拍（惯用左手的人选左手） */
-  const [hand, setHand] = useState<HandPreference>('both')
   /**
-   * 体感模式下改用鼠标左键击球。
+   * 体感模式下怎么击球。
    *
-   * 球拍仍然跟着身体移动（体感负责走位），只是挥拍改用鼠标左键——
-   * 不想挥手腕、或者手腕总被识别不到时可以这么玩。
+   * - left / right：挥指定的那只手（惯用左手的人选左手）
+   * - both：哪只手挥得更厉害就用哪只（默认）
+   * - mouse：不用手腕——走位仍然跟着身体，击球改用鼠标左键
    */
-  const [mouseSwingInPose, setMouseSwingInPose] = useState(false)
+  const [swingSource, setSwingSource] = useState<SwingSource>('both')
   /** 用户是否手动调过球速：没调过的话，切到体感模式会自动用更慢的球 */
   const speedTouchedRef = useRef(false)
   const [hud, setHud] = useState<HudState>(INITIAL_HUD)
@@ -152,8 +151,7 @@ export default function App() {
   const timeScaleRef = useRef(timeScale)
   const autoMoveRef = useRef(autoMove)
   const autoSwingRef = useRef(autoSwing)
-  const handRef = useRef(hand)
-  const mouseSwingInPoseRef = useRef(mouseSwingInPose)
+  const swingSourceRef = useRef(swingSource)
   /** 开发调试用：注入的合成姿态帧（null = 用真实摄像头） */
   const devPoseRef = useRef<PoseFrame | null>(null)
   /** setupCamera 定义在 switchInputMode 之后，用 ref 打破循环依赖 */
@@ -167,8 +165,7 @@ export default function App() {
   timeScaleRef.current = timeScale
   autoMoveRef.current = autoMove
   autoSwingRef.current = autoSwing
-  handRef.current = hand
-  mouseSwingInPoseRef.current = mouseSwingInPose
+  swingSourceRef.current = swingSource
 
   /**
    * 切换输入方式。
@@ -519,7 +516,7 @@ export default function App() {
             game.setPlayerTarget(target.x)
           }
 
-          if (mouseSwingInPoseRef.current) {
+          if (isMouseSwing(swingSourceRef.current)) {
             // 体感 + 鼠标击球：走位看身体，击球用鼠标左键
             if (mouseSwing) game.swing(0.75)
           } else {
@@ -583,7 +580,7 @@ export default function App() {
         const tracker = trackerRef.current
         const frame = lastFrame ?? tracker?.frame
         // HUD 显示的必须是"实际参与判定"的那条手臂，否则会和手感对不上
-        const sample = frame ? pickArmSample(frame, handRef.current) : null
+        const sample = frame ? pickArmSample(frame, handOf(swingSourceRef.current)) : null
         setHud((h) => ({
           ...h,
           score: { ...s.score },
@@ -595,7 +592,7 @@ export default function App() {
           hasPerson: frame?.hasPerson ?? false,
           bodyPos: frame?.hasPerson ? frame.bodyX : 0.5,
           armSeen: !!sample,
-          swingSource: sample?.source ?? null,
+          armSource: sample?.source ?? null,
           swingSpeed: sample?.speed ?? 0,
           swingVert: sample?.verticalRange ?? 0,
           message: now < messageUntil ? h.message : null,
@@ -627,14 +624,14 @@ export default function App() {
     game.options.slowMotion = slowMotion
   }, [difficulty, slowMotion])
 
-  // 挥拍阈值 / 惯用手实时生效（速度阈值与垂直位移阈值一起改）
+  // 挥拍阈值 / 击球来源实时生效（速度阈值与垂直位移阈值一起改）
   useEffect(() => {
     ensureDetector().configure({
       threshold: swingThreshold,
       verticalRange: verticalThresholdOf(swingThreshold),
-      hand,
+      hand: handOf(swingSource),
     })
-  }, [swingThreshold, hand, ensureDetector])
+  }, [swingThreshold, swingSource, ensureDetector])
 
   // 球速 / 辅助模式实时生效（不重开一局）
   useEffect(() => {
@@ -662,14 +659,15 @@ export default function App() {
    * HUD 上显示的阈值要和实际判定用的那个一致，不然会出现"明明超线了却没挥出去"。
    */
   const effSwingThreshold =
-    hud.swingSource === 'elbow' ? swingThreshold * PLAYER.elbowThresholdRatio : swingThreshold
+    hud.armSource === 'elbow' ? swingThreshold * PLAYER.elbowThresholdRatio : swingThreshold
   const effVertThreshold = effSwingThreshold * PLAYER.swingVerticalRatio
 
   /**
    * 体感模式的专属选项（设置面板和主菜单共用一份）。
    *
-   * - 挥拍手：惯用左手的人选左手，只有那只手挥动才算击球。
-   * - 鼠标左键击球：走位仍然跟着身体，但挥拍改用鼠标左键。
+   * 一个「挥拍手」分段控件决定体感模式下**怎么击球**：
+   * 左手 / 右手 / 双手 = 用手腕挥拍（惯用左手就选左手）；
+   * 鼠标左键 = 走位仍然跟着身体，击球改用鼠标左键。
    */
   const poseOptions = (
     <>
@@ -683,12 +681,13 @@ export default function App() {
               ['left', '左手'],
               ['right', '右手'],
               ['both', '双手'],
-            ] as [HandPreference, string][]
+              ['mouse', '鼠标左键'],
+            ] as [SwingSource, string][]
           ).map(([value, label]) => (
             <button
               key={value}
-              className={hand === value ? 'active' : ''}
-              onClick={() => setHand(value)}
+              className={swingSource === value ? 'active' : ''}
+              onClick={() => setSwingSource(value)}
             >
               {label}
             </button>
@@ -696,19 +695,8 @@ export default function App() {
         </div>
         <div className="setting-hint">
           惯用左手就选左手：只有选中的那只手挥动才算击球。选"双手"时哪只手动得更厉害就用哪只。
+          选"鼠标左键"时走位仍然跟着身体，但挥拍改用鼠标左键点击（不用挥手腕）。
         </div>
-      </div>
-
-      <label className="setting switch">
-        <span>鼠标左键击球</span>
-        <input
-          type="checkbox"
-          checked={mouseSwingInPose}
-          onChange={(e) => setMouseSwingInPose(e.target.checked)}
-        />
-      </label>
-      <div className="setting-hint">
-        开启后球拍仍然跟着身体移动，但挥拍改用鼠标左键——不想挥手腕时可以用。
       </div>
     </>
   )
@@ -777,18 +765,25 @@ export default function App() {
                 <div className="status-row">
                   <span>挥拍手</span>
                   <b>
-                    {hand === 'left' ? '左手' : hand === 'right' ? '右手' : '双手'}
-                    {mouseSwingInPose ? '（鼠标击球）' : ''}
+                    {swingSource === 'left'
+                      ? '左手'
+                      : swingSource === 'right'
+                        ? '右手'
+                        : swingSource === 'mouse'
+                          ? '鼠标左键'
+                          : '双手'}
                   </b>
                 </div>
                 <div className="status-row">
                   <span>采样点</span>
-                  <b className={hud.armSeen ? '' : 'bad'}>
-                    {hud.swingSource === 'wrist'
-                      ? '手腕'
-                      : hud.swingSource === 'elbow'
-                        ? '肘部（兜底）'
-                        : '无'}
+                  <b className={hud.armSeen || isMouseSwing(swingSource) ? '' : 'bad'}>
+                    {isMouseSwing(swingSource)
+                      ? '鼠标左键'
+                      : hud.armSource === 'wrist'
+                        ? '手腕'
+                        : hud.armSource === 'elbow'
+                          ? '肘部（兜底）'
+                          : '无'}
                   </b>
                 </div>
                 <div className="status-row">
@@ -804,9 +799,18 @@ export default function App() {
                   </b>
                 </div>
                 <div className="status-note">
-                  速度或垂直位移超线即算挥拍（单位：肩宽，手腕每帧的移动量）。
-                  球拍位置 = 你在画面里的位置（零点 = 画面正中）。
-                  手腕没识别到时会自动改用肘部，阈值相应放宽。
+                  {isMouseSwing(swingSource) ? (
+                    <>
+                      现在用鼠标左键击球：球拍位置 = 你在画面里的位置（零点 = 画面正中）。
+                      下面的手腕数值只是参考，不参与判定。
+                    </>
+                  ) : (
+                    <>
+                      速度或垂直位移超线即算挥拍（单位：肩宽，手腕每帧的移动量）。
+                      球拍位置 = 你在画面里的位置（零点 = 画面正中）。
+                      手腕没识别到时会自动改用肘部，阈值相应放宽。
+                    </>
+                  )}
                 </div>
                 {hud.cameraError && (
                   <div className="status-error">{hud.cameraError}</div>
@@ -1045,8 +1049,8 @@ export default function App() {
             3D 体感乒乓球。体感模式用摄像头捕捉你的身体：左右移动调整球拍位置，
             在球落到你这边台面后快速挥动手腕完成击球。
             <br />
-            惯用左手可以在下面选「左手」；不想挥手腕也可以打开「鼠标左键击球」
-            （球拍仍然跟着身体走）。
+            惯用左手可以在下面选「左手」；不想挥手腕就选「鼠标左键」
+            （球拍仍然跟着身体走，击球用鼠标左键）。
             <br />
             没有摄像头也可以用鼠标（移动鼠标 + 点击）或键盘（← → + 空格）来玩。
           </p>

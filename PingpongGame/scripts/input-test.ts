@@ -48,7 +48,9 @@ const { dispatch } = installWindowStub()
 
 const { KeyboardController } = await import('../src/input/keyboard.ts')
 const { MouseController, MOUSE_RANGE } = await import('../src/input/mouse.ts')
-const { paddleTargetFromPose, SwingDetector } = await import('../src/input/swingDetector.ts')
+const { paddleTargetFromPose, SwingDetector, handOf, isMouseSwing } = await import(
+  '../src/input/swingDetector.ts'
+)
 import type { PoseFrame } from '../src/input/poseTracker.ts'
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 
@@ -591,6 +593,25 @@ console.log('\n=== 左右手选择 ===')
   const either = makeDetector('both').process(twoHands(0, 6), 1000)
   if (!either.swung) failures++
   console.log(`  ${either.swung ? 'PASS' : 'FAIL'}  选双手时哪只手挥动都能触发`)
+}
+
+console.log('\n=== 击球来源（左手/右手/双手/鼠标左键） ===')
+{
+  // 鼠标击球：手腕检测完全不参与判定
+  if (!isMouseSwing('mouse')) failures++
+  console.log(`  ${isMouseSwing('mouse') ? 'PASS' : 'FAIL'}  鼠标左键是独立的击球来源`)
+
+  if (isMouseSwing('left') || isMouseSwing('right') || isMouseSwing('both')) failures++
+  console.log(
+    `  ${!isMouseSwing('left') && !isMouseSwing('right') && !isMouseSwing('both') ? 'PASS' : 'FAIL'}  左手/右手/双手都不是鼠标击球`,
+  )
+
+  // 鼠标击球时"用哪只手"无所谓：手腕检测压根不跑
+  if (handOf('mouse') !== 'both') failures++
+  console.log(`  ${handOf('mouse') === 'both' ? 'PASS' : 'FAIL'}  鼠标击球时手腕判定退化成任意一只手`)
+
+  if (handOf('left') !== 'left' || handOf('right') !== 'right' || handOf('both') !== 'both') failures++
+  console.log(`  ${handOf('left') === 'left' ? 'PASS' : 'FAIL'}  手腕击球时偏好原样传给判定器`)
 }
 
 console.log(failures === 0 ? '\n全部通过' : `\n失败 ${failures} 项`)

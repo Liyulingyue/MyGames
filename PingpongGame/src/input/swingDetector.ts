@@ -10,6 +10,29 @@ import type { ArmSample, PoseFrame } from './poseTracker.ts'
 export type HandPreference = 'left' | 'right' | 'both'
 
 /**
+ * 体感模式下的击球来源。
+ *
+ * - left / right：挥指定的那只手（惯用左手就选左手）
+ * - both：哪只手挥得更厉害就用哪只（默认）
+ * - mouse：不用手腕——体感只负责走位，击球由**鼠标左键**触发
+ */
+export type SwingSource = HandPreference | 'mouse'
+
+/**
+ * 从击球来源里取出"用哪只手"。
+ *
+ * 鼠标击球时手腕检测完全不参与判定，任意一只手即可。
+ */
+export function handOf(source: SwingSource): HandPreference {
+  return source === 'mouse' ? 'both' : source
+}
+
+/** 是不是"鼠标击球"（体感走位 + 鼠标左键挥拍） */
+export function isMouseSwing(source: SwingSource): boolean {
+  return source === 'mouse'
+}
+
+/**
  * 从姿态帧里挑出"用来判定挥拍"的那条手臂。
  *
  * 追踪器两条手臂都在算，判定用哪一条由偏好决定——

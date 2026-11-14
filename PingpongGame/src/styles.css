@@ -470,7 +470,7 @@ body {
 
 .seg button {
   flex: 1;
-  padding: 6px 4px;
+  padding: 6px 2px;
   border: none;
   border-radius: 7px;
   background: transparent;
@@ -478,6 +478,8 @@ body {
   font-size: 12px;
   cursor: pointer;
   font-family: inherit;
+  /* 四个选项（左手/右手/双手/鼠标左键）时也不能折行 */
+  white-space: nowrap;
 }
 
 .seg button.active {
