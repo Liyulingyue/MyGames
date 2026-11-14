@@ -540,5 +540,58 @@ console.log('\n=== 肘部兜底的判定 ===')
   console.log(`  ${empty.swung === false ? 'PASS' : 'FAIL'}  没有手臂采样时不会误触发挥拍`)
 }
 
+console.log('\n=== 左右手选择 ===')
+{
+  const { pickArmSample } = await import('../src/input/swingDetector.ts')
+
+  /** 两只手各有各的速度 */
+  const twoHands = (leftSpeed: number, rightSpeed: number): PoseFrame => ({
+    hasPerson: true,
+    bodyX: 0.5,
+    bodyScale: 0.25,
+    leftArm: { x: 0.4, y: 0.5, speed: leftSpeed, verticalRange: 0.05, source: 'wrist' },
+    rightArm: { x: 0.6, y: 0.5, speed: rightSpeed, verticalRange: 0.05, source: 'wrist' },
+    fastest: {
+      x: 0.5,
+      y: 0.5,
+      speed: Math.max(leftSpeed, rightSpeed),
+      verticalRange: 0.05,
+      source: 'wrist',
+    },
+    timestamp: 0,
+  })
+
+  approx('选左手 → 取左手的速度', pickArmSample(twoHands(1, 5), 'left')?.speed ?? 0, 1, 1e-9)
+  approx('选右手 → 取右手的速度', pickArmSample(twoHands(1, 5), 'right')?.speed ?? 0, 5, 1e-9)
+  approx('选双手 → 取动得更厉害的那只', pickArmSample(twoHands(1, 5), 'both')?.speed ?? 0, 5, 1e-9)
+
+  const makeDetector = (hand: 'left' | 'right' | 'both') =>
+    new SwingDetector({
+      threshold: 2.5,
+      verticalRange: 0.2,
+      fullPowerScale: 3,
+      cooldown: 0.42,
+      releaseRatio: 0.55,
+      hand,
+    })
+
+  // 惯用左手：右手在画面里乱动也不该触发
+  const onlyRight = makeDetector('left').process(twoHands(0, 6), 1000)
+  if (onlyRight.swung) failures++
+  console.log(`  ${onlyRight.swung === false ? 'PASS' : 'FAIL'}  选左手时右手挥动不触发`)
+
+  const onlyLeft = makeDetector('left').process(twoHands(6, 0), 1000)
+  if (!onlyLeft.swung) failures++
+  console.log(`  ${onlyLeft.swung ? 'PASS' : 'FAIL'}  选左手时左手挥动能触发`)
+
+  const rightOnly = makeDetector('right').process(twoHands(0, 6), 1000)
+  if (!rightOnly.swung) failures++
+  console.log(`  ${rightOnly.swung ? 'PASS' : 'FAIL'}  选右手时右手挥动能触发`)
+
+  const either = makeDetector('both').process(twoHands(0, 6), 1000)
+  if (!either.swung) failures++
+  console.log(`  ${either.swung ? 'PASS' : 'FAIL'}  选双手时哪只手挥动都能触发`)
+}
+
 console.log(failures === 0 ? '\n全部通过' : `\n失败 ${failures} 项`)
 process.exit(failures === 0 ? 0 : 1)

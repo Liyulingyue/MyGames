@@ -491,6 +491,15 @@ body {
   accent-color: var(--accent);
 }
 
+/* 主菜单里的体感选项（走位用身体，击球用手/鼠标） */
+.menu-options {
+  width: 420px;
+  max-width: 92%;
+  margin: 16px 0 6px;
+  text-align: left;
+  font-size: 13px;
+}
+
 .switch {
   display: flex;
   align-items: center;

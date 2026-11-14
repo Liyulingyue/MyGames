@@ -1,4 +1,28 @@
-import type { PoseFrame } from './poseTracker.ts'
+import type { ArmSample, PoseFrame } from './poseTracker.ts'
+
+/**
+ * 用哪只手挥拍。
+ *
+ * - left / right：只有选中的那只手才算（惯用左手的人选左手，
+ *   免得另一只手在画面里乱动也触发）。
+ * - both：哪只手动得更厉害就用哪只（默认，最不容易漏判）。
+ */
+export type HandPreference = 'left' | 'right' | 'both'
+
+/**
+ * 从姿态帧里挑出"用来判定挥拍"的那条手臂。
+ *
+ * 追踪器两条手臂都在算，判定用哪一条由偏好决定——
+ * HUD 显示的数值也用这个函数挑，保证"看到的"和"判定的"是同一个。
+ */
+export function pickArmSample(
+  frame: PoseFrame,
+  hand: HandPreference = 'both',
+): ArmSample | null {
+  if (hand === 'left') return frame.leftArm
+  if (hand === 'right') return frame.rightArm
+  return frame.fastest
+}
 
 export interface SwingOptions {
   /** 触发挥拍的速度阈值（肩宽 / 秒，按路径长度算） */
@@ -23,6 +47,8 @@ export interface SwingOptions {
    * 所以阈值要放宽，否则兜底几乎不可能触发（等于白加）。
    */
   elbowRatio?: number
+  /** 用哪只手挥拍（默认 both：哪只动得厉害用哪只） */
+  hand?: HandPreference
 }
 
 /**
@@ -55,13 +81,14 @@ export class SwingDetector {
    * @returns 本帧是否触发了挥拍，以及力度 0~1
    */
   process(frame: PoseFrame, now: number): { swung: boolean; power: number } {
-    if (!frame.fastest) {
+    const sample = pickArmSample(frame, this.options.hand ?? 'both')
+    if (!sample) {
       // 没采到手臂运动（人离开画面 / 手腕和肘部都没识别到）→ 重新武装
       this.armed = true
       return { swung: false, power: 0 }
     }
 
-    const { speed, verticalRange, source } = frame.fastest
+    const { speed, verticalRange, source } = sample
 
     // 肘部兜底时阈值放宽（肘部动作幅度比手腕小）
     const ratio = source === 'elbow' ? (this.options.elbowRatio ?? 0.6) : 1
