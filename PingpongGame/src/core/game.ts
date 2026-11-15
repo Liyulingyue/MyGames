@@ -61,6 +61,8 @@ export interface GameOptions {
    * 辅助击球（默认 false）：球进到拍区自动挥拍，玩家只负责走位。
    */
   autoSwing?: boolean
+  /** 保留手动挥拍，放宽挥拍时间和拍面偏差 */
+  hitAssist?: boolean
 }
 
 export interface GameState {
@@ -128,6 +130,7 @@ export class PingPongGame {
       timeScale: options.timeScale ?? 1,
       autoMove: options.autoMove ?? false,
       autoSwing: options.autoSwing ?? false,
+      hitAssist: options.hitAssist ?? false,
     }
 
     this.rng = createRng(this.options.seed)
@@ -214,7 +217,7 @@ export class PingPongGame {
     const p = s.playerPaddle
     if (p.cooldown > 0) return false
 
-    p.activeTimer = PADDLE.swingActiveTime
+    p.activeTimer = this.options.hitAssist ? PADDLE.assistSwingActiveTime : PADDLE.swingActiveTime
     p.cooldown = PADDLE.swingCooldown
     p.lastSwingPower = clamp(power, 0, 1)
     p.swingAnim = 1
@@ -307,8 +310,16 @@ export class PingPongGame {
     if (this.options.autoSwing) this.tryAutoSwing()
 
     // —— 我方挥拍命中判定 ——
-    if (s.playerPaddle.activeTimer > 0) {
-      const reach = checkSwingReach(s.ball, s.playerPaddle)
+    if (
+      s.playerPaddle.activeTimer > 0 &&
+      (!this.options.hitAssist || (s.playerWindowOpen && s.lastHitter === 'opponent' && s.ball.vel.z < 0))
+    ) {
+      const reach = checkSwingReach(
+        s.ball,
+        s.playerPaddle,
+        PADDLE.swingDepth,
+        this.options.hitAssist ? PADDLE.assistBladeReach : PADDLE.bladeReach,
+      )
       if (reach) this.hitByPlayer(reach, events)
     }
 
@@ -616,7 +627,9 @@ export class PingPongGame {
   /** 当前是否处于"该挥拍了"的窗口 */
   get shouldSwing(): boolean {
     const s = this.state
-    return s.playerWindowOpen && s.ball.pos.z < 0
+    const eta = this.timeToPaddle
+    const window = this.options.hitAssist ? PADDLE.assistSwingActiveTime : PADDLE.swingActiveTime
+    return s.playerWindowOpen && s.lastHitter === 'opponent' && eta !== null && eta <= window * 0.8
   }
 
   /** 球飞到我方拍面还要多久（秒），不在接近中则返回 null */

@@ -168,6 +168,7 @@ export default function App() {
   const [timeScale, setTimeScale] = useState<number>(NORMAL_DEFAULT_TIME_SCALE)
   const [autoMove, setAutoMove] = useState(false)
   const [autoSwing, setAutoSwing] = useState(false)
+  const [hitAssist, setHitAssist] = useState(true)
   /**
    * 体感模式下怎么击球。
    *
@@ -232,6 +233,7 @@ export default function App() {
   const timeScaleRef = useRef(timeScale)
   const autoMoveRef = useRef(autoMove)
   const autoSwingRef = useRef(autoSwing)
+  const hitAssistRef = useRef(hitAssist)
   const swingSourceRef = useRef(swingSource)
   /** 取景设置：新开一局时新建的渲染器要沿用当前设置 */
   const displaySizeRef = useRef(displaySize)
@@ -251,6 +253,7 @@ export default function App() {
   timeScaleRef.current = timeScale
   autoMoveRef.current = autoMove
   autoSwingRef.current = autoSwing
+  hitAssistRef.current = hitAssist
   swingSourceRef.current = swingSource
   pausedRef.current = showSettings
   environmentRef.current = environment
@@ -472,6 +475,7 @@ export default function App() {
       timeScale: timeScaleRef.current,
       autoMove: autoMoveRef.current,
       autoSwing: autoSwingRef.current,
+      hitAssist: hitAssistRef.current,
     })
     gameRef.current = game
     game.start()
@@ -965,7 +969,8 @@ export default function App() {
     game.options.timeScale = timeScale
     game.options.autoMove = autoMove
     game.options.autoSwing = autoSwing
-  }, [timeScale, autoMove, autoSwing])
+    game.options.hitAssist = hitAssist
+  }, [timeScale, autoMove, autoSwing, hitAssist])
 
   // 显示尺寸实时生效（只动相机，物理完全不受影响）
   useEffect(() => {
@@ -1146,6 +1151,7 @@ export default function App() {
               <span>{inputMode === 'pose' ? '体感' : inputMode === 'mouse' ? '鼠标' : '键盘'}操作</span>
               <span>对手：{difficulty === 'easy' ? '简单' : difficulty === 'normal' ? '普通' : '困难'}</span>
               <span>球速：{timeScale.toFixed(2)}x</span>
+              <span>手动击球辅助：{hitAssist ? '开' : '关'}</span>
               <span>音效：{soundOn ? `${Math.round(soundVolume * 100)}%` : '关闭'}</span>
               <p>静态预览不模拟对局；操作、球速和辅助效果需开始游戏体验。</p>
               {inputMode === 'pose' && <p>摄像头：{hud.cameraState === 'ready' ? '已就绪' : hud.cameraState === 'loading' ? '正在准备' : '未就绪'}</p>}
@@ -1568,6 +1574,18 @@ export default function App() {
 
               <div className="setting-group">
                 <div className="setting-group-title">辅助</div>
+
+                <label className="setting switch">
+                  <span>手动击球辅助</span>
+                  <input
+                    type="checkbox"
+                    checked={hitAssist}
+                    onChange={(e) => setHitAssist(e.target.checked)}
+                  />
+                </label>
+                <div className="setting-hint">
+                  仍需自己走位和挥拍；适度放宽提前挥拍和拍面偏差。关闭后恢复原判定。
+                </div>
 
                 <label className="setting switch">
                   <span>辅助移动</span>

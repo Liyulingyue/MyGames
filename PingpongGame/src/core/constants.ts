@@ -90,6 +90,9 @@ export const PADDLE = {
   swingDepth: 0.05,
   /** 挥拍后"可击中"状态的持续时间（秒） */
   swingActiveTime: 0.17,
+  /** 手动击球辅助：适度放宽提前挥拍和拍面内的偏差 */
+  assistSwingActiveTime: 0.30,
+  assistBladeReach: 0.18,
   /** 两次挥拍之间的最小间隔（秒） */
   swingCooldown: 0.26,
   /** 击球速度下限（低于此速度球可能落在本方半区） */

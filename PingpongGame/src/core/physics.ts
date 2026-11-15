@@ -133,13 +133,14 @@ export function checkSwingReach(
   ball: Ball,
   paddle: Paddle,
   depth: number = PADDLE.swingDepth,
+  bladeReach: number = PADDLE.bladeReach,
 ): PaddleHit | null {
   const offsetX = ball.pos.x - paddle.x
   const offsetY = ball.pos.y - paddle.y
   const offsetZ = ball.pos.z - paddle.z
 
   // 拍面是 XY 平面上的一块圆盘
-  if (Math.hypot(offsetX, offsetY) > PADDLE.bladeReach) return null
+  if (Math.hypot(offsetX, offsetY) > bladeReach) return null
   // 挥拍扫过的厚度
   if (Math.abs(offsetZ) > depth) return null
 

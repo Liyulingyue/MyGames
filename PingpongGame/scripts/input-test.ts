@@ -53,6 +53,7 @@ const { paddleTargetFromPose, SwingDetector, handOf, isMouseSwing } = await impo
 )
 import type { PoseFrame } from '../src/input/poseTracker.ts'
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
+import { PADDLE } from '../src/core/constants.ts'
 
 let failures = 0
 
@@ -95,7 +96,9 @@ console.log('=== 键盘映射 ===')
 
   // 活动范围夹取
   const farRight = holdKey('ArrowRight', 120)
-  approx('向右夹在活动范围内', farRight.x, -0.72, 1e-9)
+  approx('向右覆盖球拍完整行程', farRight.x, -PADDLE.rangeX, 1e-9)
+  const farLeft = holdKey('ArrowLeft', 120)
+  approx('向左覆盖球拍完整行程', farLeft.x, PADDLE.rangeX, 1e-9)
 
   const keyboard = new KeyboardController()
   const detach = keyboard.attach()

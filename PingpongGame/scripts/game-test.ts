@@ -10,12 +10,121 @@
  */
 
 import { PingPongGame } from '../src/core/game.ts'
-import { PADDLE } from '../src/core/constants.ts'
+import { FIXED_DT, PADDLE } from '../src/core/constants.ts'
 
 let failures = 0
 function assert(name: string, ok: boolean, detail = ''): void {
   if (!ok) failures++
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : `  ${detail}`}`)
+}
+
+console.log('=== 手动击球辅助 ===')
+{
+  function attempt(
+    assisted: boolean,
+    delay: number,
+    offsetX: number,
+    options: { windowOpen?: boolean; velocityZ?: number; depth?: number; swing?: boolean } = {},
+  ): number {
+    const game = new PingPongGame({ seed: 17, hitAssist: assisted, slowMotion: false, autoHeight: false })
+    game.start()
+    const s = game.state
+    s.phase = 'rally'
+    s.lastHitter = 'opponent'
+    s.bounces = { player: 1, opponent: 0 }
+    s.playerWindowOpen = options.windowOpen ?? true
+    s.ball.pos = { x: 0, y: 0.6, z: -0.5 }
+    s.ball.vel = { x: 0, y: 0, z: -0.1 }
+    if (options.swing !== false) game.swing(0.75)
+    for (let i = 0; i < Math.round(delay / FIXED_DT); i++) game.step(FIXED_DT)
+    s.ball.pos = { x: offsetX, y: s.playerPaddle.y, z: PADDLE.homeZ + (options.depth ?? 0.02) }
+    s.ball.vel = { x: 0, y: 0, z: options.velocityZ ?? -2 }
+    const events = game.step(FIXED_DT * 2)
+    return events.filter((event) => event.type === 'paddleHit' && event.side === 'player' && event.power === 0.75).length
+  }
+
+  const delays = [0.08, 0.12, 0.20, 0.24, 0.28, 0.31]
+  const offsets = [0, 0.10, 0.15, 0.19]
+  let originalHits = 0
+  let assistedHits = 0
+  for (const delay of delays) {
+    for (const offset of offsets) {
+      originalHits += attempt(false, delay, offset)
+      assistedHits += attempt(true, delay, offset)
+    }
+  }
+  assert('固定输入下辅助增加命中（15/24，原判定 4/24）', originalHits === 4 && assistedHits === 15,
+    `原判定 ${originalHits}/24，辅助 ${assistedHits}/24`)
+  assert('不挥拍不会自动击球', attempt(true, 0.08, 0, { swing: false }) === 0)
+  assert('未落台不能辅助击球', attempt(true, 0.08, 0, { windowOpen: false }) === 0)
+  assert('远离球拍的球不能辅助击球', attempt(true, 0.08, 0, { depth: 0.08 }) === 0)
+  assert('飞离球拍的球不能辅助击球', attempt(true, 0.08, 0, { velocityZ: 2 }) === 0)
+  assert('横向超出辅助范围不能击球', attempt(true, 0.08, 0.19) === 0)
+  assert('辅助关闭时保留原判定', attempt(false, 0.20, 0) === 0 && attempt(false, 0.08, 0.15) === 0)
+
+  const game = new PingPongGame({ hitAssist: true, slowMotion: false, autoHeight: false })
+  game.start()
+  const state = game.state
+  state.phase = 'rally'
+  state.lastHitter = 'opponent'
+  state.bounces = { player: 1, opponent: 0 }
+  state.playerWindowOpen = true
+  state.ball.pos = { x: 0, y: state.playerPaddle.y, z: PADDLE.homeZ + 0.8 }
+  state.ball.vel = { x: 0, y: 0, z: -2 }
+  assert('远离球拍时不提示立即挥拍', !game.shouldSwing)
+  state.ball.pos.z = PADDLE.homeZ + 0.2
+  assert('合法来球接近球拍时提示挥拍', game.shouldSwing)
+  state.ball.pos.z = PADDLE.homeZ + 0.02
+  game.swing(0.75)
+  const first = game.step(FIXED_DT * 2)
+  state.lastHitter = 'opponent'
+  state.bounces = { player: 1, opponent: 0 }
+  state.playerWindowOpen = true
+  state.ball.pos = { x: 0, y: state.playerPaddle.y, z: PADDLE.homeZ + 0.02 }
+  state.ball.vel = { x: 0, y: 0, z: -2 }
+  const second = game.step(FIXED_DT * 2)
+  assert('一次挥拍至多主动击球一次',
+    first.some((event) => event.type === 'paddleHit' && event.power === 0.75) &&
+      !second.some((event) => event.type === 'paddleHit' && event.power === 0.75))
+}
+
+console.log('\n=== 固定来球对比 ===')
+{
+  function firstReturn(seed: number, hitAssist: boolean): { attempted: boolean; hit: boolean } {
+    const game = new PingPongGame({ seed, hitAssist, slowMotion: false })
+    game.start()
+    let attempted = false
+    for (let frame = 0; frame < 120 * 30; frame++) {
+      const state = game.state
+      if (state.lastHitter === 'opponent' && state.ball.vel.z < 0) {
+        game.setPlayerTarget(state.ball.pos.x + 0.14)
+        const eta = game.timeToPaddle
+        if (!attempted && state.playerWindowOpen && eta !== null && eta <= 0.23) {
+          attempted = game.swing(0.75)
+        }
+      }
+      const events = game.step(1 / 120)
+      if (events.some((event) => event.type === 'paddleHit' && event.side === 'player' && event.power === 0.75)) {
+        return { attempted, hit: true }
+      }
+      if (state.phase === 'point' || state.phase === 'gameover') break
+    }
+    return { attempted, hit: false }
+  }
+
+  let attempts = 0
+  let originalHits = 0
+  let assistedHits = 0
+  for (let seed = 1; seed <= 30; seed++) {
+    const original = firstReturn(seed, false)
+    const assisted = firstReturn(seed, true)
+    if (original.attempted && assisted.attempted) attempts++
+    if (original.hit) originalHits++
+    if (assisted.hit) assistedHits++
+  }
+  assert('相同种子和挥拍策略下辅助提高首球命中', attempts >= 20 && assistedHits >= originalHits + 5,
+    `共同挥拍 ${attempts}/30，原判定 ${originalHits}，辅助 ${assistedHits}`)
+  console.log(`  首球对比：共同挥拍 ${attempts}/30，原判定 ${originalHits}，辅助 ${assistedHits}`)
 }
 
 // ---------------------------------------------------------------- 1. 停顿不锁死

@@ -9,6 +9,8 @@
  * 方向按"屏幕方向"理解：按右键球拍在屏幕上往右走。
  * 由于相机朝 +Z 看，屏幕右方对应世界 -X，映射时需要取反。
  */
+import { PADDLE } from '../core/constants.ts'
+
 export class KeyboardController {
   private keys = new Set<string>()
   private targetX = 0
@@ -50,7 +52,7 @@ export class KeyboardController {
       this.targetX += dx * this.speed * dt
     }
 
-    this.targetX = Math.max(-0.72, Math.min(0.72, this.targetX))
+    this.targetX = Math.max(-PADDLE.rangeX, Math.min(PADDLE.rangeX, this.targetX))
 
     return { x: this.targetX }
   }
