@@ -25,7 +25,7 @@ import {
   type Framing,
 } from '../src/render/view.ts'
 import { PADDLE, TABLE } from '../src/core/constants.ts'
-import { Color } from 'three'
+import { Box3, BoxGeometry, Color, Mesh } from 'three'
 import { createScene } from '../src/render/scene.ts'
 
 let failures = 0
@@ -388,6 +388,34 @@ console.log('\n=== 场馆环境切换 ===')
       built.scene.children.length === objectCount && built.camera.position.equals(cameraPosition))
     built.setEnvironment('bright')
     ok('切回明亮环境恢复原背景', background() === bright)
+
+    const tableParts = built.tableTop.parent!.children.filter(
+      (part): part is Mesh<BoxGeometry> => part instanceof Mesh && part.geometry instanceof BoxGeometry,
+    )
+    const legs = tableParts.filter((part) => part.geometry.parameters.width === 0.06 && part.geometry.parameters.depth === 0.06)
+    const rims = tableParts.filter((part) => part.geometry.parameters.height === 0.012)
+    const beams = tableParts.filter((part) => part.geometry.parameters.height === 0.05 && part !== built.tableTop)
+    const bounds = (part: Mesh) => new Box3().setFromObject(part)
+    const tableBounds = bounds(built.tableTop)
+    ok('四条桌腿从地板连接到台面下方，不穿透台板',
+      legs.length === 4 && legs.every((leg) => {
+        const box = bounds(leg)
+        return Math.abs(box.min.y - TABLE.floorY) < 1e-6 && box.max.y <= tableBounds.min.y + 1e-6
+      }))
+    ok('四条边框在角部不重叠',
+      rims.length === 4 && rims.every((rim, i) => rims.slice(i + 1).every((other) => {
+        const a = bounds(rim)
+        const b = bounds(other)
+        return Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x) <= 1e-6 ||
+          Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z) <= 1e-6
+      })))
+    ok('横梁与桌腿连接但不互相穿透',
+      beams.length === 2 && beams.every((beam) => legs.every((leg) => {
+        const a = bounds(beam)
+        const b = bounds(leg)
+        return Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x) <= 1e-6 ||
+          Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z) <= 1e-6
+      })))
   } finally {
     if (previous) Object.defineProperty(globalThis, 'document', previous)
     else Reflect.deleteProperty(globalThis, 'document')

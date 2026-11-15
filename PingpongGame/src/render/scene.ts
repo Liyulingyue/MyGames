@@ -201,6 +201,7 @@ export function createScene(): {
   // 台面边框（白色）
   const rimMaterial = new THREE.MeshStandardMaterial({ color: '#e8eef8', roughness: 0.5 })
   const rimH = 0.012
+  const rimWidth = 0.015
   const rimY = TABLE.surfaceY + rimH / 2
   const addRim = (w: number, d: number, x: number, z: number) => {
     const rim = new THREE.Mesh(new THREE.BoxGeometry(w, rimH, d), rimMaterial)
@@ -208,22 +209,24 @@ export function createScene(): {
     rim.castShadow = true
     tableGroup.add(rim)
   }
-  addRim(TABLE.width + 0.03, 0.015, 0, TABLE.halfLength + 0.007)
-  addRim(TABLE.width + 0.03, 0.015, 0, -TABLE.halfLength - 0.007)
-  addRim(0.015, TABLE.length + 0.03, TABLE.halfWidth + 0.007, 0)
-  addRim(0.015, TABLE.length + 0.03, -TABLE.halfWidth - 0.007, 0)
+  addRim(TABLE.width + 2 * rimWidth, rimWidth, 0, TABLE.halfLength + rimWidth / 2)
+  addRim(TABLE.width + 2 * rimWidth, rimWidth, 0, -TABLE.halfLength - rimWidth / 2)
+  addRim(rimWidth, TABLE.length, TABLE.halfWidth + rimWidth / 2, 0)
+  addRim(rimWidth, TABLE.length, -TABLE.halfWidth - rimWidth / 2, 0)
 
   // 桌腿
   const legMaterial = new THREE.MeshStandardMaterial({ color: '#22304a', roughness: 0.6, metalness: 0.3 })
-  const legHeight = Math.abs(TABLE.floorY)
+  const legWidth = 0.06
+  const legX = TABLE.halfWidth - 0.12
+  const legHeight = TABLE.surfaceY - TABLE.thickness - TABLE.floorY
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       const leg = new THREE.Mesh(
-        new THREE.BoxGeometry(0.06, legHeight, 0.06),
+        new THREE.BoxGeometry(legWidth, legHeight, legWidth),
         legMaterial,
       )
       leg.position.set(
-        sx * (TABLE.halfWidth - 0.12),
+        sx * legX,
         TABLE.floorY + legHeight / 2,
         sz * (TABLE.halfLength - 0.14),
       )
@@ -234,7 +237,7 @@ export function createScene(): {
   // 横梁
   for (const sz of [-1, 1]) {
     const beam = new THREE.Mesh(
-      new THREE.BoxGeometry(TABLE.width - 0.2, 0.05, 0.05),
+      new THREE.BoxGeometry(2 * legX - legWidth, 0.05, 0.05),
       legMaterial,
     )
     beam.position.set(0, TABLE.floorY + 0.06, sz * (TABLE.halfLength - 0.14))
