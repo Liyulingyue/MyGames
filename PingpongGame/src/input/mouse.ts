@@ -1,3 +1,5 @@
+import { PADDLE } from '../core/constants.ts'
+
 /**
  * 鼠标输入：移动鼠标控制球拍左右，点击左键挥拍。
  *
@@ -21,7 +23,7 @@ export interface MouseControllerOptions {
 }
 
 /** 鼠标横移到屏幕最边上时，球拍到达的最大偏移（米） */
-export const MOUSE_RANGE = 0.75
+export const MOUSE_RANGE = PADDLE.rangeX
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v
