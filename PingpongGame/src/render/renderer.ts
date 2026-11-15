@@ -133,6 +133,7 @@ export class GameRenderer {
     this.camera.aspect = aspect
     this.applyFraming(aspect)
     this.renderer.setSize(w, h, false)
+    this.render()
   }
 
   /**

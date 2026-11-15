@@ -12,10 +12,11 @@ import type { SwingSource } from './input/swingDetector.ts'
 import { KeyboardController } from './input/keyboard.ts'
 import { MouseController } from './input/mouse.ts'
 import { SoundEngine } from './input/sound.ts'
+import { SettingsPreview } from './SettingsPreview.tsx'
 
 type InputMode = 'keyboard' | 'pose' | 'mouse'
 type Difficulty = 'easy' | 'normal' | 'hard'
-type Screen = 'menu' | 'playing'
+type Screen = 'menu' | 'settings' | 'playing'
 
 /**
  * 由"挥拍灵敏度"推出垂直位移阈值。
@@ -207,6 +208,8 @@ export default function App() {
   const restartBtnRef = useRef<HTMLButtonElement>(null)
   const settingsBtnRef = useRef<HTMLButtonElement>(null)
   const exitDialogRef = useRef<HTMLDialogElement>(null)
+  const restoreMenuFocusRef = useRef(false)
+  const startGenerationRef = useRef(0)
 
   const gameRef = useRef<PingPongGame | null>(null)
   const rendererRef = useRef<GameRenderer | null>(null)
@@ -380,17 +383,19 @@ export default function App() {
   cameraSetupRef.current = setupCamera
 
   const startGame = useCallback(async () => {
+    const generation = ++startGenerationRef.current
     // 浏览器规定 AudioContext 必须在用户手势里解锁，否则一直是挂起状态
     ensureSound().unlock()
     if (inputModeRef.current === 'pose' && !trackerRef.current) {
       // 摄像头没起来就留在开始界面并给出提示，避免玩家对着黑屏找不到原因
       const ok = await setupCamera()
-      if (!ok) return
+      if (!ok || generation !== startGenerationRef.current) return
     }
     if (!rendererModuleRef.current) {
       setBooting(true)
       try {
         rendererModuleRef.current = await import('./render/renderer.ts')
+        if (generation !== startGenerationRef.current) return
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setBootError(`3D 渲染器加载失败：${message}`)
@@ -422,6 +427,7 @@ export default function App() {
 
   /** 结束这一局，回到主菜单 */
   const backToMenu = useCallback(() => {
+    startGenerationRef.current++
     cameraGenerationRef.current++
     pendingTrackerRef.current?.close()
     pendingTrackerRef.current = null
@@ -435,6 +441,19 @@ export default function App() {
     setShowSettings(false)
     setHud(INITIAL_HUD)
   }, [])
+
+  const leaveSettingsPage = useCallback(() => {
+    startGenerationRef.current++
+    restoreMenuFocusRef.current = true
+    setScreen('menu')
+  }, [])
+
+  useEffect(() => {
+    if (screen === 'menu' && restoreMenuFocusRef.current) {
+      settingsBtnRef.current?.focus()
+      restoreMenuFocusRef.current = false
+    }
+  }, [screen])
 
   // ---------------------------------------------------------------- 主循环
 
@@ -868,6 +887,11 @@ export default function App() {
       // 焦点在按钮/滑块里时，回车交给控件自己处理，避免重复触发
       const inControl = !!target?.closest?.('button, input, select, textarea')
       if (e.key === 'Escape') {
+        if (screen === 'settings') {
+          e.preventDefault()
+          leaveSettingsPage()
+          return
+        }
         if (confirmExit) {
           e.preventDefault()
           exitDialogRef.current?.close()
@@ -893,7 +917,7 @@ export default function App() {
       }
     }
     const onPointerDown = (e: MouseEvent) => {
-      if (!showSettings || confirmExit) return
+      if (screen !== 'playing' || !showSettings || confirmExit) return
       const target = e.target as HTMLElement | null
       // 点面板内部或齿轮按钮都不关
       if (target?.closest?.('.settings, .settings-toggle, .menu-settings')) return
@@ -906,7 +930,7 @@ export default function App() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('mousedown', onPointerDown)
     }
-  }, [showSettings, confirmExit, hud.gameOver, screen, backToMenu, restartGame, startGame])
+  }, [showSettings, confirmExit, hud.gameOver, screen, backToMenu, leaveSettingsPage, restartGame, startGame])
 
   // 音效开关 / 音量实时生效
   useEffect(() => {
@@ -1095,8 +1119,42 @@ export default function App() {
   })()
 
   return (
-    <div className={`app ${screen === 'menu' && environment === 'bright' ? 'menu-bright' : ''}`}>
+    <div className={`app ${screen !== 'playing' && environment === 'bright' ? 'menu-bright' : ''}`}>
       <div className="canvas-host" ref={containerRef} />
+
+      {screen === 'settings' && (
+        <main className="settings-page">
+          <header className="settings-page-header">
+            <button className="ghost-btn" onClick={leaveSettingsPage}>返回首页</button>
+            <h1>游戏设置</h1>
+            <button className="start-btn" onClick={startGame} disabled={booting}>
+              {booting ? '正在准备…' : '开始游戏'}
+            </button>
+          </header>
+          <section className="settings-preview-area" aria-label="预览和设置状态">
+            <div className="settings-preview-heading">
+              <h2>画面预览</h2>
+              <p>场馆、显示尺寸和相机位姿实时生效。预览比例与当前屏幕一致。</p>
+            </div>
+            <SettingsPreview
+              environment={environment}
+              displaySize={displaySize}
+              cameraPose={cameraPose}
+              aspect={viewAspect}
+            />
+            <div className="settings-preview-summary" aria-live="polite">
+              <span>{inputMode === 'pose' ? '体感' : inputMode === 'mouse' ? '鼠标' : '键盘'}操作</span>
+              <span>对手：{difficulty === 'easy' ? '简单' : difficulty === 'normal' ? '普通' : '困难'}</span>
+              <span>球速：{timeScale.toFixed(2)}x</span>
+              <span>音效：{soundOn ? `${Math.round(soundVolume * 100)}%` : '关闭'}</span>
+              <p>静态预览不模拟对局；操作、球速和辅助效果需开始游戏体验。</p>
+              {inputMode === 'pose' && <p>摄像头：{hud.cameraState === 'ready' ? '已就绪' : hud.cameraState === 'loading' ? '正在准备' : '未就绪'}</p>}
+              {bootError && <p className="start-error" role="alert">{bootError}</p>}
+              {booting && <LoadProgressBar progress={loadProgress} />}
+            </div>
+          </section>
+        </main>
+      )}
 
       <div className="hud">
         {screen === 'playing' && (
@@ -1278,11 +1336,15 @@ export default function App() {
             </button>
           )}
 
-          {showSettings && (
-            <div className="settings glass" role="dialog" aria-label="设置">
+          {(showSettings || screen === 'settings') && (
+            <div
+              className={`settings glass ${screen === 'settings' ? 'settings-page-panel' : ''}`}
+              role={screen === 'playing' ? 'dialog' : 'region'}
+              aria-label="设置"
+            >
               <div className="settings-header">
-                <h3>{screen === 'playing' ? '设置 · 比赛已暂停' : '游戏设置'}</h3>
-                <button
+                <h3>{screen === 'playing' ? '设置 · 比赛已暂停' : '调整设置'}</h3>
+                {screen === 'playing' && <button
                   className="mini-btn"
                   onClick={() => {
                     setShowSettings(false)
@@ -1290,7 +1352,7 @@ export default function App() {
                   }}
                 >
                   关闭设置
-                </button>
+                </button>}
               </div>
               {screen === 'playing' && (
                 <button className="ghost-btn settings-home" onClick={() => setConfirmExit(true)}>
@@ -1308,18 +1370,21 @@ export default function App() {
                   <div className="seg">
                     <button
                       className={inputMode === 'pose' ? 'active' : ''}
+                      aria-pressed={inputMode === 'pose'}
                       onClick={() => switchInputMode('pose')}
                     >
                       体感
                     </button>
                     <button
                       className={inputMode === 'mouse' ? 'active' : ''}
+                      aria-pressed={inputMode === 'mouse'}
                       onClick={() => switchInputMode('mouse')}
                     >
                       鼠标
                     </button>
                     <button
                       className={inputMode === 'keyboard' ? 'active' : ''}
+                      aria-pressed={inputMode === 'keyboard'}
                       onClick={() => switchInputMode('keyboard')}
                     >
                       键盘
@@ -1350,6 +1415,7 @@ export default function App() {
                       <button
                         key={d}
                         className={difficulty === d ? 'active' : ''}
+                        aria-pressed={difficulty === d}
                         onClick={() => setDifficulty(d)}
                       >
                         {d === 'easy' ? '简单' : d === 'normal' ? '普通' : '困难'}
@@ -1720,8 +1786,8 @@ export default function App() {
             <button
               ref={settingsBtnRef}
               className="ghost-btn menu-settings"
-              onClick={() => setShowSettings((v) => !v)}
-              aria-expanded={showSettings}
+              onClick={() => setScreen('settings')}
+              disabled={booting}
             >
               ⚙ 游戏设置
             </button>
