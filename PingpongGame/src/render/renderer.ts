@@ -3,7 +3,14 @@ import type { GameState } from '../core/game.ts'
 import { PADDLE, TABLE } from '../core/constants.ts'
 import { createScene } from './scene.ts'
 import { applyPaddleTransform, createBall, createPaddle } from './meshes.ts'
-import { fitFraming, viewOffset, type Framing } from './view.ts'
+import {
+  DEFAULT_CAMERA,
+  fitFraming,
+  resolveCamera,
+  viewOffset,
+  type CameraPose,
+  type Framing,
+} from './view.ts'
 
 /** 拖尾保留的历史点数 */
 const TRAIL_LENGTH = 18
@@ -44,10 +51,14 @@ export class GameRenderer {
   private camera: THREE.PerspectiveCamera
   private container: HTMLElement
 
-  /** 当前生效的取景（随宽高比和显示尺寸变化） */
+  /** 当前生效的取景（随宽高比、显示尺寸和相机位姿变化） */
   private framing: Framing = fitFraming(1, 1)
   /** 显示尺寸倍率：1 = 原样 */
   private displaySize = 1
+  /** 相机位姿（位置 + 俯角），用户可调 */
+  private cameraPose: CameraPose = { ...DEFAULT_CAMERA }
+  /** 每帧跟随球拍带来的横向偏移（米） */
+  private panX = 0
 
   private ball: THREE.Mesh
   private playerPaddle: THREE.Group
@@ -121,15 +132,18 @@ export class GameRenderer {
   }
 
   /**
-   * 按当前宽高比和显示尺寸重新算取景。
+   * 按当前宽高比、显示尺寸和相机位姿重新算取景。
    *
-   * 宽高比变了（转屏、窗口缩放、手机横竖屏切换）或者用户改了显示尺寸，
-   * 都要重算：球拍必须始终留在画面里，球台在不同屏幕上看起来也要差不多大。
+   * 宽高比变了（转屏、窗口缩放、手机横竖屏切换）、用户改了显示尺寸、
+   * 或者用户动了相机滑块，都要重算：
+   * 球拍必须始终留在画面里，球台在不同屏幕上看起来也要差不多大。
    *
-   * 注意：相机位置和朝向**永远不动**，改的只有镜头张角和裁剪窗口。
+   * 注意两条轴是分开的：
+   *   - 显示尺寸只改镜头张角和裁剪窗口，**绝不碰相机位姿**；
+   *   - 相机位姿只改相机的位置和朝向，不改显示尺寸的语义。
    */
   private applyFraming(aspect: number): void {
-    this.framing = fitFraming(aspect, this.displaySize)
+    this.framing = fitFraming(aspect, this.displaySize, this.cameraPose)
     const w = this.container.clientWidth || 1
     const h = this.container.clientHeight || 1
     const offset = viewOffset(w, h, this.framing)
@@ -143,15 +157,30 @@ export class GameRenderer {
       offset.width,
       offset.height,
     )
-    // 相机位置锁死，只留 x 给每帧的横向跟随用
-    this.camera.position.y = this.framing.position.y
-    this.camera.position.z = this.framing.position.z
-    this.camera.lookAt(this.framing.target.x, this.framing.target.y, this.framing.target.z)
+    this.applyCameraPose()
+  }
+
+  /**
+   * 把位姿落到相机上：位置 = 位姿 + 横向跟随，朝向由位姿和俯角解算。
+   *
+   * 朝向是"水平瞄准球台远端中心 + 俯角下压"，
+   * 所以左右滑块是横向平移（不会把画面拧歪），俯角是独立的第二个轴。
+   */
+  private applyCameraPose(): void {
+    const cam = resolveCamera(this.cameraPose, this.panX)
+    this.camera.position.set(cam.eye.x, cam.eye.y, cam.eye.z)
+    this.camera.lookAt(cam.target.x, cam.target.y, cam.target.z)
   }
 
   /** 设置显示尺寸倍率（1 = 原样），立刻生效，不用重开一局 */
   setDisplaySize(size: number): void {
     this.displaySize = size
+    this.applyFraming(this.camera.aspect)
+  }
+
+  /** 设置相机位姿（位置 + 俯角），立刻生效，不用重开一局 */
+  setCameraPose(pose: CameraPose): void {
+    this.cameraPose = { ...pose }
     this.applyFraming(this.camera.aspect)
   }
 
@@ -171,13 +200,10 @@ export class GameRenderer {
     this.opponent.position.z = PADDLE.opponentZ + 0.55
 
     // 相机跟随我方横向位置（轻微，增加临场感）
+    // 跟随量是相对用户设定位的偏移，用户把相机推到左边不会把跟随吃掉。
     const targetX = state.playerPaddle.x * 0.22
-    this.camera.position.x += (targetX - this.camera.position.x) * 0.08
-    this.camera.lookAt(
-      this.camera.position.x * 0.4,
-      this.framing.target.y,
-      this.framing.target.z,
-    )
+    this.panX += (targetX - this.panX) * 0.08
+    this.applyCameraPose()
   }
 
   /**

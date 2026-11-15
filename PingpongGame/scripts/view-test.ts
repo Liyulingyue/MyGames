@@ -1,18 +1,29 @@
 /**
  * 取景回归测试。
  *
- * 检查五件事：
- *   1. 基准情况（16:9 + 显示尺寸 1.0）必须和最初的相机一模一样；
- *   2. **相机永远不动**：位置和朝向在任何宽高比、任何显示尺寸下都不变
+ * 检查七件事：
+ *   1. 基准情况（16:9 + 显示尺寸 1.0 + 默认位姿）必须和最初的相机一模一样；
+ *   2. **显示尺寸永远不碰相机**：改显示尺寸时相机位姿一点不变
  *      （这是"画面拉大"不能变成俯视视角的保证）；
  *   3. 各种宽高比下球拍（尤其是漂到台面外的宽球位置）都必须留在画面里；
  *   4. 显示尺寸只做裁剪放大：球拍一侧的可见范围一点不变，越大远端球台越大；
- *   5. 放大到上限时对手也不能被裁掉。
+ *   5. 放大到上限时对手也不能被裁掉；
+ *   6. 相机位姿可调：默认位姿复现原取景，改位姿只改画面、不改显示尺寸语义；
+ *   7. 相机位姿在滑块范围内时，取景不会崩（球台不会整个跑出画面）。
  *
  * 纯数学，不依赖 DOM 和 Three.js。
  */
 
-import { VIEW, fitFraming, type Framing } from '../src/render/view.ts'
+import {
+  CAMERA_LIMITS,
+  DEFAULT_CAMERA,
+  VIEW,
+  checkFrame,
+  fitFraming,
+  resolveCamera,
+  type CameraPose,
+  type Framing,
+} from '../src/render/view.ts'
 import { PADDLE, TABLE } from '../src/core/constants.ts'
 
 let failures = 0
@@ -48,7 +59,7 @@ function basis(f: Framing) {
 /**
  * 世界坐标 → 画面里的 NDC（x、y 都是 [-1,1] 为画面边界）。
  *
- * 先算"虚拟大图"上的位置（相机没动过，所以这一步永远只跟几何有关），
+ * 先算"虚拟大图"上的位置（这一步只跟相机几何有关），
  * 再套上裁剪窗口：横向居中、纵向贴下沿。
  * 缩小（zoom < 1）时镜头直接开大，没有裁剪窗口。
  */
@@ -80,20 +91,26 @@ const OPPONENT_HEAD = { x: 0, y: 1.015, z: PADDLE.opponentZ + 0.55 }
 /** 我方球拍最远位置 */
 const PADDLE_FAR = { x: VIEW.reachX, y: PADDLE.homeY, z: PADDLE.homeZ }
 
-console.log('=== 基准取景不能被改坏（16:9 + 显示尺寸 1.0）===')
+console.log('=== 基准取景不能被改坏（16:9 + 显示尺寸 1.0 + 默认位姿）===')
 {
   const f = fitFraming(VIEW.referenceAspect, 1)
   approx('fov', f.fov, VIEW.base.fov, 1e-9)
   approx('相机 x', f.position.x, VIEW.base.pos.x, 1e-9)
   approx('相机 y', f.position.y, VIEW.base.pos.y, 1e-9)
   approx('相机 z', f.position.z, VIEW.base.pos.z, 1e-9)
-  approx('看向 x', f.target.x, VIEW.base.target.x, 1e-9)
-  approx('看向 y', f.target.y, VIEW.base.target.y, 1e-9)
-  approx('看向 z', f.target.z, VIEW.base.target.z, 1e-9)
   approx('裁剪倍率', f.zoom, 1, 1e-9)
+
+  // 默认位姿的俯角必须精确复现原相机的视线方向
+  approx('默认俯角', DEFAULT_CAMERA.angle, (Math.atan2(1.28, 3.15) * 180) / Math.PI, 1e-12)
+  const cam = resolveCamera(DEFAULT_CAMERA)
+  const want = { x: 0, y: -1.28, z: 3.15 }
+  const wl = Math.hypot(want.x, want.y, want.z)
+  approx('视线方向 x', cam.dir.x, want.x / wl, 1e-12)
+  approx('视线方向 y', cam.dir.y, want.y / wl, 1e-12)
+  approx('视线方向 z', cam.dir.z, want.z / wl, 1e-12)
 }
 
-console.log('\n=== 相机永远不动（任何宽高比 × 任何显示尺寸）===')
+console.log('\n=== 显示尺寸永远不碰相机（任何宽高比 × 任何显示尺寸）===')
 {
   let moved = 0
   let fovMoved = 0
@@ -103,16 +120,13 @@ console.log('\n=== 相机永远不动（任何宽高比 × 任何显示尺寸）
       const same =
         f.position.x === VIEW.base.pos.x &&
         f.position.y === VIEW.base.pos.y &&
-        f.position.z === VIEW.base.pos.z &&
-        f.target.x === VIEW.base.target.x &&
-        f.target.y === VIEW.base.target.y &&
-        f.target.z === VIEW.base.target.z
+        f.position.z === VIEW.base.pos.z
       if (!same) moved++
       // 纵向张角只能因为窄屏而开大，不能因为显示尺寸而变
       if (size > 1 && aspect >= 1.3333 && f.sourceFov !== VIEW.base.fov) fovMoved++
     }
   }
-  ok('相机位置/朝向 0 次变化', moved === 0)
+  ok('相机位置 0 次变化', moved === 0)
   ok('横屏的虚拟大图张角恒为基准（显示尺寸不碰它）', fovMoved === 0)
 }
 
@@ -249,6 +263,101 @@ console.log('\n=== 不同屏幕上球台看起来要差不多大（按屏幕高�
     `横屏各宽高比：远端台角占屏高 ${((sizes[0] * 100).toFixed(1))}%（差异 ${(spread * 100).toFixed(1)}%）`,
     spread <= 0.02,
   )
+}
+
+console.log('\n=== 相机位姿：默认位姿复现原取景，改位姿只改画面 ===')
+{
+  const aspect = 16 / 9
+  const base = fitFraming(aspect, 1)
+  // 默认位姿 = 原相机
+  approx('默认位姿的相机 x', base.position.x, VIEW.base.pos.x, 1e-9)
+  approx('默认位姿的相机 y', base.position.y, VIEW.base.pos.y, 1e-9)
+  approx('默认位姿的相机 z', base.position.z, VIEW.base.pos.z, 1e-9)
+
+  // 改位姿：相机位置跟着变
+  const moved: CameraPose = { ...DEFAULT_CAMERA, x: 0.8, y: 1.8, z: -3.0, angle: 30 }
+  const f2 = fitFraming(aspect, 1, moved)
+  approx('改位姿后相机 x', f2.position.x, 0.8, 1e-9)
+  approx('改位姿后相机 y', f2.position.y, 1.8, 1e-9)
+  approx('改位姿后相机 z', f2.position.z, -3.0, 1e-9)
+  ok('改位姿后画面确实变了', project(f2, PADDLE_FAR, aspect).x !== project(base, PADDLE_FAR, aspect).x)
+
+  // 关键：位姿变了，显示尺寸的语义不变
+  // （放大 3 倍 = 裁剪放大，裁剪窗口贴下沿：
+  //   屏幕 x = k·虚拟 x，屏幕 y + 1 = k·(虚拟 y + 1)）
+  const f3 = fitFraming(aspect, VIEW.maxDisplaySize, moved)
+  const p1 = project(f2, PADDLE_FAR, aspect)
+  const p3 = project(f3, PADDLE_FAR, aspect)
+  approx('位姿变了，放大倍率仍然精确等于 3', p3.x, p1.x * VIEW.maxDisplaySize, 1e-9)
+  const lo1 = project(f2, { x: 0, y: PADDLE.minY, z: PADDLE.homeZ }, aspect)
+  const lo3 = project(f3, { x: 0, y: PADDLE.minY, z: PADDLE.homeZ }, aspect)
+  approx(
+    '位姿变了，裁剪仍然严格按倍率缩放',
+    lo3.y + 1,
+    (lo1.y + 1) * VIEW.maxDisplaySize,
+    1e-9,
+  )
+}
+
+console.log('\n=== 滑块范围内取景不崩：不出 NaN、相机不会跑到台子后面 ===')
+{
+  let worstTable = 0
+  let worstPaddle = 0
+  let checked = 0
+  let broken = 0
+  for (const aspect of ASPECTS) {
+    for (const size of SIZES) {
+      for (const kx of [CAMERA_LIMITS.x.min, 0, CAMERA_LIMITS.x.max]) {
+        for (const ky of [CAMERA_LIMITS.y.min, CAMERA_LIMITS.y.max]) {
+          for (const kz of [CAMERA_LIMITS.z.min, CAMERA_LIMITS.z.max]) {
+            for (const ka of [CAMERA_LIMITS.angle.min, 20, CAMERA_LIMITS.angle.max]) {
+              const pose: CameraPose = { x: kx, y: ky, z: kz, angle: ka }
+              const f = fitFraming(aspect, size, pose)
+              const table = project(f, { x: TABLE.halfWidth, y: 0, z: 0 }, aspect)
+              const paddle = project(f, PADDLE_FAR, aspect)
+              worstTable = Math.max(worstTable, Math.abs(table.x))
+              worstPaddle = Math.max(worstPaddle, Math.abs(paddle.x))
+              checked++
+              const finite =
+                Number.isFinite(table.x) && Number.isFinite(paddle.x) && Number.isFinite(f.fov)
+              // 相机必须还在我方球拍后面、而且在球台上方
+              const sane =
+                f.position.z <= CAMERA_LIMITS.z.max + 1e-9 &&
+                f.position.z >= CAMERA_LIMITS.z.min - 1e-9 &&
+                f.position.y > 0 &&
+                f.fov > 0 &&
+                f.fov < 180
+              if (!finite || !sane) {
+                broken++
+                if (broken <= 3) {
+                  console.log(`    异常位姿 ${JSON.stringify(pose)} aspect=${aspect} size=${size}`)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  console.log(
+    `  组合数 ${checked}，台面中心横向最远 ${worstTable.toFixed(2)}，球拍横向最远 ${worstPaddle.toFixed(2)}`,
+  )
+  ok('没有任何一组位姿算出 NaN 或非法相机', broken === 0)
+  ok('极端位姿下内容也只是偏出画面，不会翻车', worstTable < 20 && worstPaddle < 20)
+}
+
+console.log('\n=== 画面检查（诊断）能给出一致的结果 ===')
+{
+  const aspect = 16 / 9
+  const good = checkFrame(aspect, 1, DEFAULT_CAMERA)
+  ok('默认位姿下一切正常', good.ok)
+  ok('默认位姿下球拍横向在画面内', good.paddleX <= 1)
+  // 相机转到底下（俯角 60°）时球拍多半会出画，诊断要能看出来
+  const steep = checkFrame(aspect, 1, { ...DEFAULT_CAMERA, angle: 60, y: 2.6 })
+  console.log(
+    `  俯角 60° + 高 2.6m：球拍横向 ${steep.paddleX.toFixed(2)}，球拍纵向 ${steep.paddleBottom.toFixed(2)} ~ ${steep.paddleTop.toFixed(2)}`,
+  )
+  ok('极端位姿下诊断仍然是有限数', Number.isFinite(steep.paddleX) && Number.isFinite(steep.paddleTop))
 }
 
 console.log(failures === 0 ? '\n全部通过' : `\n失败 ${failures} 项`)

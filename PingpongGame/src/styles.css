@@ -456,8 +456,49 @@ body {
 .setting-label {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 6px;
   color: var(--muted);
+}
+
+/* 相机滑块：一组滑块共用一个标题，所以每条之间留点空隙 */
+.camera-slider {
+  margin-bottom: 8px;
+}
+
+.camera-slider .setting-label {
+  margin-bottom: 2px;
+  font-size: 11px;
+}
+
+/* 设置面板里的小按钮（恢复默认等） */
+.mini-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--muted);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.mini-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* 诊断结果：正常 / 出画 */
+.setting-label b.good {
+  color: #7bd88f;
+}
+
+.setting-label b.warn {
+  color: #ffd166;
+}
+
+.setting-label b.bad {
+  color: #ff9a76;
 }
 
 .seg {

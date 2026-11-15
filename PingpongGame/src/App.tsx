@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PingPongGame } from './core/game.ts'
 import { AI_PRESETS, PLAYER, TARGET_SCORE } from './core/constants.ts'
 import type { Phase, Side } from './core/types.ts'
 import { GameRenderer } from './render/renderer.ts'
-import { VIEW } from './render/view.ts'
+import { CAMERA_LIMITS, DEFAULT_CAMERA, VIEW, checkFrame, type CameraPose } from './render/view.ts'
 import { PoseTracker, isVisible } from './input/poseTracker.ts'
 import type { MotionSource, PoseFrame } from './input/poseTracker.ts'
 import { SwingDetector, paddleTargetFromPose, pickArmSample, handOf, isMouseSwing } from './input/swingDetector.ts'
@@ -133,6 +133,10 @@ export default function App() {
   const [soundVolume, setSoundVolume] = useState(0.65)
   /** 画面倍率：1 = 原样，3 = 画面放大约三倍，0.5 = 画面缩一半（裁剪缩放，透视不变） */
   const [displaySize, setDisplaySize] = useState(1)
+  /** 相机位姿：位置 (x/y/z) + 俯角，用户可调（范围受限） */
+  const [cameraPose, setCameraPose] = useState<CameraPose>({ ...DEFAULT_CAMERA })
+  /** 画布宽高比：给"画面检查"诊断用 */
+  const [viewAspect, setViewAspect] = useState(VIEW.referenceAspect)
   /** 用户是否手动调过球速：没调过的话，切到体感模式会自动用更慢的球 */
   const speedTouchedRef = useRef(false)
   const [hud, setHud] = useState<HudState>(INITIAL_HUD)
@@ -161,6 +165,9 @@ export default function App() {
   const autoMoveRef = useRef(autoMove)
   const autoSwingRef = useRef(autoSwing)
   const swingSourceRef = useRef(swingSource)
+  /** 取景设置：新开一局时新建的渲染器要沿用当前设置 */
+  const displaySizeRef = useRef(displaySize)
+  const cameraPoseRef = useRef(cameraPose)
   /** 开发调试用：注入的合成姿态帧（null = 用真实摄像头） */
   const devPoseRef = useRef<PoseFrame | null>(null)
   /** setupCamera 定义在 switchInputMode 之后，用 ref 打破循环依赖 */
@@ -329,6 +336,9 @@ export default function App() {
 
     const renderer = new GameRenderer(container)
     rendererRef.current = renderer
+    // 新渲染器要沿用当前的取景设置（重开一局也不丢）
+    renderer.setDisplaySize(displaySizeRef.current)
+    renderer.setCameraPose(cameraPoseRef.current)
 
     // 鼠标：mousemove 挂在 window 上（移出画布也继续跟踪），
     // mousedown 挂在画布容器上（点到 HUD 按钮时不要误挥拍）
@@ -715,8 +725,30 @@ export default function App() {
 
   // 显示尺寸实时生效（只动相机，物理完全不受影响）
   useEffect(() => {
+    displaySizeRef.current = displaySize
     rendererRef.current?.setDisplaySize(displaySize)
   }, [displaySize])
+
+  // 相机位姿实时生效（只动相机，物理完全不受影响）
+  useEffect(() => {
+    cameraPoseRef.current = cameraPose
+    rendererRef.current?.setCameraPose(cameraPose)
+  }, [cameraPose])
+
+  // 记录画布宽高比：窄屏要开大镜头，画面检查也按这个比例算
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => {
+      const w = el.clientWidth || 1
+      const h = el.clientHeight || 1
+      setViewAspect(w / h)
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   // 退出时释放摄像头
   useEffect(() => {
@@ -737,6 +769,42 @@ export default function App() {
   const effSwingThreshold =
     hud.armSource === 'elbow' ? swingThreshold * PLAYER.elbowThresholdRatio : swingThreshold
   const effVertThreshold = effSwingThreshold * PLAYER.swingVerticalRatio
+
+  /**
+   * 画面检查：当前位姿 + 显示尺寸下，球拍和对手还在不在画面里。
+   *
+   * 相机是手动调的，可能把画面调歪（球拍出画、对手出画），
+   * 所以在设置面板里实时把结果显示出来，而不是让玩家自己猜"球呢？"
+   */
+  const frameCheck = useMemo(
+    () => checkFrame(viewAspect, displaySize, cameraPose),
+    [viewAspect, displaySize, cameraPose],
+  )
+
+  /**
+   * 诊断结论分三种：
+   *   - 一切正常；
+   *   - 相机没事，是「显示尺寸」的裁剪把东西裁掉了（放大到 3 倍时必然如此）；
+   *   - 相机本身把东西挤出画面了（要往回调）。
+   */
+  const frameStatus = frameCheck.ok
+    ? { text: '一切正常', cls: 'good' }
+    : frameCheck.cameraOk
+      ? { text: '被显示尺寸裁掉了', cls: 'warn' }
+      : { text: '相机出画了', cls: 'bad' }
+
+  /** 相机滑块的定义（范围来自 CAMERA_LIMITS） */
+  const cameraSliders: {
+    key: keyof CameraPose
+    label: string
+    unit: string
+    digits: number
+  }[] = [
+    { key: 'x', label: '相机左右', unit: 'm', digits: 2 },
+    { key: 'y', label: '相机高度', unit: 'm', digits: 2 },
+    { key: 'z', label: '相机远近', unit: 'm', digits: 2 },
+    { key: 'angle', label: '相机俯角', unit: '°', digits: 1 },
+  ]
 
   /**
    * 体感模式的专属选项（设置面板和主菜单共用一份）。
@@ -1067,6 +1135,68 @@ export default function App() {
                   相机不动、透视不变，只是把画面裁一块出来重新铺满屏幕。
                   1.0 是原样：往上调画面放大（球台、球、球拍一起变大，裁掉的是上方空背景），
                   往下调画面缩小、露出更多场景。放到 3.0 就只剩我方这半张台面了。
+                </div>
+              </div>
+
+              <div className="setting">
+                <div className="setting-label">
+                  <span>相机位姿</span>
+                  <button
+                    className="mini-btn"
+                    onClick={() => setCameraPose({ ...DEFAULT_CAMERA })}
+                  >
+                    恢复默认
+                  </button>
+                </div>
+                {cameraSliders.map((row) => {
+                  const limit = CAMERA_LIMITS[row.key]
+                  return (
+                    <div key={row.key} className="camera-slider">
+                      <div className="setting-label">
+                        <span>{row.label}</span>
+                        <b>
+                          {cameraPose[row.key].toFixed(row.digits)}
+                          {row.unit}
+                        </b>
+                      </div>
+                      <input
+                        type="range"
+                        min={limit.min}
+                        max={limit.max}
+                        step={limit.step}
+                        value={cameraPose[row.key]}
+                        onChange={(e) =>
+                          setCameraPose({ ...cameraPose, [row.key]: Number(e.target.value) })
+                        }
+                      />
+                    </div>
+                  )
+                })}
+                <div className="setting-hint">
+                  相机位置和俯角可以手动调（范围有限，不会跑飞）。
+                  左右是横向平移，俯角决定往下看多少度——这两条和「球台显示尺寸」
+                  完全独立：调显示尺寸永远只是裁剪放大，不会把视角变成俯视。
+                </div>
+              </div>
+
+              <div className="setting">
+                <div className="setting-label">
+                  <span>画面检查</span>
+                  <b className={frameStatus.cls}>{frameStatus.text}</b>
+                </div>
+                <div className="setting-hint">
+                  球拍横向 {frameCheck.paddleX.toFixed(2)}（≤1 在画面内）·
+                  球拍纵向 {frameCheck.paddleCenter.toFixed(2)}（
+                  {frameCheck.paddleBottom.toFixed(2)} ~ {frameCheck.paddleTop.toFixed(2)}）·
+                  对手头顶 {frameCheck.opponentHead.toFixed(2)}
+                  {!frameCheck.paddleOk &&
+                    (frameCheck.cameraOk
+                      ? ' —— 球拍被放大裁掉了。'
+                      : ' —— 球拍出画了，往回调一点。')}
+                  {!frameCheck.opponentOk &&
+                    (frameCheck.cameraOk
+                      ? ' —— 对手被放大裁掉了。'
+                      : ' —— 对手出画了，往回调一点。')}
                 </div>
               </div>
 
