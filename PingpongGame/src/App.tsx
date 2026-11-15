@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { PingPongGame } from './core/game.ts'
-import { AI_PRESETS, PLAYER, TARGET_SCORE } from './core/constants.ts'
+import { AI_PRESETS, HIT_JUDGMENT_PRESETS, PADDLE, PLAYER, TARGET_SCORE } from './core/constants.ts'
+import type { HitJudgment } from './core/constants.ts'
 import type { Phase, Side } from './core/types.ts'
 import type { GameRenderer } from './render/renderer.ts'
 import type { Environment } from './render/scene.ts'
@@ -17,6 +18,14 @@ import { SettingsPreview } from './SettingsPreview.tsx'
 type InputMode = 'keyboard' | 'pose' | 'mouse'
 type Difficulty = 'easy' | 'normal' | 'hard'
 type Screen = 'menu' | 'settings' | 'playing'
+
+const HIT_JUDGMENT_LABELS: Record<HitJudgment, string> = {
+  original: '原始',
+  light: '弱',
+  standard: '标准',
+  strong: '强',
+}
+const HIT_JUDGMENT_LEVELS: HitJudgment[] = ['original', 'light', 'standard', 'strong']
 
 /**
  * 由"挥拍灵敏度"推出垂直位移阈值。
@@ -171,7 +180,7 @@ export default function App() {
   const [timeScale, setTimeScale] = useState<number>(NORMAL_DEFAULT_TIME_SCALE)
   const [autoMove, setAutoMove] = useState(false)
   const [autoSwing, setAutoSwing] = useState(false)
-  const [hitAssist, setHitAssist] = useState(true)
+  const [hitJudgment, setHitJudgment] = useState<HitJudgment>('standard')
   const [predictionAssist, setPredictionAssist] = useState(false)
   const [softAlign, setSoftAlign] = useState(false)
   const [softAlignStrength, setSoftAlignStrength] = useState(0.6)
@@ -239,7 +248,7 @@ export default function App() {
   const timeScaleRef = useRef(timeScale)
   const autoMoveRef = useRef(autoMove)
   const autoSwingRef = useRef(autoSwing)
-  const hitAssistRef = useRef(hitAssist)
+  const hitJudgmentRef = useRef(hitJudgment)
   const predictionAssistRef = useRef(predictionAssist)
   const softAlignRef = useRef(softAlign)
   const softAlignStrengthRef = useRef(softAlignStrength)
@@ -262,7 +271,7 @@ export default function App() {
   timeScaleRef.current = timeScale
   autoMoveRef.current = autoMove
   autoSwingRef.current = autoSwing
-  hitAssistRef.current = hitAssist
+  hitJudgmentRef.current = hitJudgment
   predictionAssistRef.current = predictionAssist
   softAlignRef.current = softAlign
   softAlignStrengthRef.current = softAlignStrength
@@ -487,7 +496,7 @@ export default function App() {
       timeScale: timeScaleRef.current,
       autoMove: autoMoveRef.current,
       autoSwing: autoSwingRef.current,
-      hitAssist: hitAssistRef.current,
+      hitJudgment: hitJudgmentRef.current,
       predictionAssist: predictionAssistRef.current,
       softAlign: softAlignRef.current,
       softAlignStrength: softAlignStrengthRef.current,
@@ -984,7 +993,7 @@ export default function App() {
     game.options.timeScale = timeScale
     game.options.autoMove = autoMove
     game.options.autoSwing = autoSwing
-    game.options.hitAssist = hitAssist
+    game.options.hitJudgment = hitJudgment
     game.options.predictionAssist = predictionAssist
     game.options.softAlign = softAlign
     game.options.softAlignStrength = softAlignStrength
@@ -993,7 +1002,7 @@ export default function App() {
       rendererRef.current.sync(game.state)
       rendererRef.current.render()
     }
-  }, [timeScale, autoMove, autoSwing, hitAssist, predictionAssist, softAlign, softAlignStrength])
+  }, [timeScale, autoMove, autoSwing, hitJudgment, predictionAssist, softAlign, softAlignStrength])
 
   // 显示尺寸实时生效（只动相机，物理完全不受影响）
   useEffect(() => {
@@ -1174,7 +1183,7 @@ export default function App() {
               <span>{inputMode === 'pose' ? '体感' : inputMode === 'mouse' ? '鼠标' : '键盘'}操作</span>
               <span>对手：{difficulty === 'easy' ? '简单' : difficulty === 'normal' ? '普通' : '困难'}</span>
               <span>球速：{timeScale.toFixed(2)}x</span>
-              <span>手动击球辅助：{hitAssist ? '开' : '关'}</span>
+              <span>击球判定：{HIT_JUDGMENT_LABELS[hitJudgment]}</span>
               <span>辅助预测：{predictionAssist ? '开' : '关'}</span>
               <span>软吸附：{softAlign ? autoMove ? '自动跟球优先' : `${Math.round(softAlignStrength * 100)}%` : '关'}</span>
               <span>音效：{soundOn ? `${Math.round(soundVolume * 100)}%` : '关闭'}</span>
@@ -1600,16 +1609,29 @@ export default function App() {
               <div className="setting-group">
                 <div className="setting-group-title">辅助</div>
 
-                <label className="setting switch">
-                  <span>手动击球辅助</span>
-                  <input
-                    type="checkbox"
-                    checked={hitAssist}
-                    onChange={(e) => setHitAssist(e.target.checked)}
-                  />
-                </label>
-                <div className="setting-hint">
-                  仍需自己走位和挥拍；适度放宽提前挥拍和拍面偏差。关闭后恢复原判定。
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>击球判定</span>
+                    <b>{HIT_JUDGMENT_LABELS[hitJudgment]}</b>
+                  </div>
+                  <div className="seg" role="group" aria-label="击球判定">
+                    {HIT_JUDGMENT_LEVELS.map((level) => (
+                      <button
+                        key={level}
+                        className={hitJudgment === level ? 'active' : ''}
+                        aria-pressed={hitJudgment === level}
+                        onClick={() => setHitJudgment(level)}
+                      >
+                        {HIT_JUDGMENT_LABELS[level]}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="setting-hint">
+                    挥拍有效期 {HIT_JUDGMENT_PRESETS[hitJudgment].swingTime.toFixed(2)} 秒模拟时间 ·
+                    拍面偏差 {(HIT_JUDGMENT_PRESETS[hitJudgment].bladeReach * 100).toFixed(0)}cm ·
+                    前后距离 {PADDLE.swingDepth * 100}cm。标准档为原有辅助效果；
+                    辅助档只对落台后飞向球拍的来球生效，原始档保留旧判定。仍需自己走位和挥拍；修改从下次挥拍起生效。
+                  </div>
                 </div>
 
                 <label className="setting switch">

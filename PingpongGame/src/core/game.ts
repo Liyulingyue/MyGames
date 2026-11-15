@@ -2,12 +2,13 @@ import {
   AI_PRESETS,
   BALL,
   FIXED_DT,
+  HIT_JUDGMENT_PRESETS,
   PADDLE,
   SERVE_ROTATION,
   TABLE,
   TARGET_SCORE,
 } from './constants.ts'
-import type { AIConfig } from './constants.ts'
+import type { AIConfig, HitJudgment } from './constants.ts'
 import { createAIState, updateAI } from './ai.ts'
 import type { AIState } from './ai.ts'
 import {
@@ -62,8 +63,8 @@ export interface GameOptions {
    * 辅助击球（默认 false）：球进到拍区自动挥拍，玩家只负责走位。
    */
   autoSwing?: boolean
-  /** 保留手动挥拍，放宽挥拍时间和拍面偏差 */
-  hitAssist?: boolean
+  /** 手动击球判定档位 */
+  hitJudgment?: HitJudgment
   /** 显示预测击球位置，不影响球拍移动 */
   predictionAssist?: boolean
   /** 仅在目标靠近来球时轻微引导球拍，强度为 0～1 */
@@ -125,6 +126,7 @@ export class PingPongGame {
   private predictionTimer = 0
   private interceptX: number | null = null
   private playerBounceAge = 0
+  private activeHitJudgment: HitJudgment = 'original'
 
   constructor(options: GameOptions = {}) {
     const preset = options.ai ?? 'normal'
@@ -141,7 +143,7 @@ export class PingPongGame {
       timeScale: options.timeScale ?? 1,
       autoMove: options.autoMove ?? false,
       autoSwing: options.autoSwing ?? false,
-      hitAssist: options.hitAssist ?? false,
+      hitJudgment: options.hitJudgment ?? 'original',
       predictionAssist: options.predictionAssist ?? false,
       softAlign: options.softAlign ?? false,
       softAlignStrength: options.softAlignStrength ?? 0.6,
@@ -245,7 +247,8 @@ export class PingPongGame {
     const p = s.playerPaddle
     if (p.cooldown > 0) return false
 
-    p.activeTimer = this.options.hitAssist ? PADDLE.assistSwingActiveTime : PADDLE.swingActiveTime
+    this.activeHitJudgment = this.options.hitJudgment
+    p.activeTimer = HIT_JUDGMENT_PRESETS[this.activeHitJudgment].swingTime
     p.cooldown = PADDLE.swingCooldown
     p.lastSwingPower = clamp(power, 0, 1)
     p.swingAnim = 1
@@ -342,13 +345,13 @@ export class PingPongGame {
     // —— 我方挥拍命中判定 ——
     if (
       s.playerPaddle.activeTimer > 0 &&
-      (!this.options.hitAssist || (s.playerWindowOpen && s.lastHitter === 'opponent' && s.ball.vel.z < 0))
+      (this.activeHitJudgment === 'original' || (s.playerWindowOpen && s.lastHitter === 'opponent' && s.ball.vel.z < 0))
     ) {
       const reach = checkSwingReach(
         s.ball,
         s.playerPaddle,
         PADDLE.swingDepth,
-        this.options.hitAssist ? PADDLE.assistBladeReach : PADDLE.bladeReach,
+        HIT_JUDGMENT_PRESETS[this.activeHitJudgment].bladeReach,
       )
       if (reach) this.hitByPlayer(reach, events)
     }
@@ -699,7 +702,7 @@ export class PingPongGame {
   get shouldSwing(): boolean {
     const s = this.state
     const eta = this.timeToPaddle
-    const window = this.options.hitAssist ? PADDLE.assistSwingActiveTime : PADDLE.swingActiveTime
+    const window = HIT_JUDGMENT_PRESETS[this.options.hitJudgment].swingTime
     return s.playerWindowOpen && s.lastHitter === 'opponent' && eta !== null && eta <= window * 0.8
   }
 

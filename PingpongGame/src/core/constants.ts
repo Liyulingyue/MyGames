@@ -149,6 +149,15 @@ export const AI_PRESETS: Record<'easy' | 'normal' | 'hard', AIConfig> = {
   },
 }
 
+export const HIT_JUDGMENT_PRESETS = {
+  original: { swingTime: PADDLE.swingActiveTime, bladeReach: PADDLE.bladeReach },
+  light: { swingTime: 0.23, bladeReach: 0.15 },
+  standard: { swingTime: PADDLE.assistSwingActiveTime, bladeReach: PADDLE.assistBladeReach },
+  strong: { swingTime: 0.36, bladeReach: 0.20 },
+} as const
+
+export type HitJudgment = keyof typeof HIT_JUDGMENT_PRESETS
+
 /** 玩家手感相关 */
 export const PLAYER = {
   /**
