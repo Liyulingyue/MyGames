@@ -81,6 +81,7 @@ body {
 .hud {
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
 }
 
@@ -575,13 +576,15 @@ body {
   position: absolute;
   top: 18px;
   right: 18px;
-  width: 38px;
+  min-width: 76px;
   height: 38px;
+  padding: 0 10px;
   border-radius: var(--radius-sm);
   background: var(--panel);
   border: 1px solid var(--border);
   color: var(--text);
-  font-size: 17px;
+  font-family: inherit;
+  font-size: 14px;
   cursor: pointer;
   backdrop-filter: blur(12px);
   box-shadow: var(--shadow);
@@ -590,7 +593,6 @@ body {
 
 .settings-toggle:hover {
   border-color: var(--accent);
-  transform: rotate(25deg);
 }
 
 .settings-toggle.active {
@@ -642,20 +644,61 @@ body {
   background: rgba(255, 255, 255, 0.32);
 }
 
-.settings h3 {
-  /* 面板能滚了，标题跟着吸顶，滚到哪儿都知道自己在设置里 */
+.settings-header {
   position: sticky;
   top: 0;
   z-index: 1;
-  margin: 0 0 4px;
-  /* 面板自己的上边距挪到标题身上，吸顶时视觉间距才不变 */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   padding: 16px 0 10px;
   background: var(--panel-solid);
+}
+
+.settings h3 {
+  margin: 0;
   font-size: 12px;
   color: var(--muted);
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+}
+
+.settings-home {
+  width: 100%;
+  margin: 6px 0 10px;
+}
+
+.exit-dialog {
+  width: min(360px, calc(100vw - 32px));
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-solid);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.exit-dialog::backdrop {
+  background: rgba(4, 7, 16, 0.72);
+}
+
+.exit-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+
+.exit-dialog p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.exit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
 }
 
 /* 设置项分组：小标题 + 分隔线，一眼能扫到 */
@@ -931,13 +974,72 @@ input[type='range']:active::-webkit-slider-thumb {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 16px;
   /* 矮屏时菜单本身可以滚，别把「开始游戏」挤出屏幕 */
   overflow-y: auto;
   padding: 24px 16px;
   background: radial-gradient(circle at 50% 35%, rgba(20, 32, 62, 0.92), rgba(5, 8, 18, 0.97));
   backdrop-filter: blur(4px);
+}
+
+.menu-bright {
+  --panel: rgba(248, 252, 249, 0.97);
+  --panel-solid: #f8fcf9;
+  --border: rgba(51, 99, 95, 0.23);
+  --border-strong: rgba(35, 101, 100, 0.48);
+  --text: #203d3d;
+  --muted: #506d6a;
+  --accent: #08718b;
+  --accent-soft: rgba(8, 113, 139, 0.12);
+  --good: #087047;
+  --warn: #8a5700;
+  --danger: #a53e2b;
+  --shadow: 0 10px 30px rgba(48, 77, 68, 0.2);
+  --shadow-lg: 0 24px 60px rgba(48, 77, 68, 0.2);
+}
+
+.menu-bright .start-overlay {
+  background: linear-gradient(180deg, #e5eee7 0%, #cbded2 70%, #d7b897 70%, #cda780 100%);
+}
+
+.menu-bright .menu-card {
+  background: rgba(250, 253, 250, 0.9);
+}
+
+.menu-bright .start-title {
+  background-image: linear-gradient(120deg, #086481, #388a67);
+}
+
+.menu-bright .mode-card {
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.menu-bright .mode-card.active {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px rgba(8, 113, 139, 0.2);
+}
+
+.menu-bright .flow-step {
+  color: #15566a;
+  background: rgba(8, 113, 139, 0.08);
+  border-color: rgba(8, 113, 139, 0.2);
+}
+
+.menu-bright .seg {
+  background: rgba(43, 82, 78, 0.1);
+}
+
+.menu-bright .seg button.active {
+  color: #fff;
+}
+
+.menu-bright input[type='range']::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--fill, 50%), #c1d3cd var(--fill, 50%), #c1d3cd 100%);
+}
+
+.menu-bright input[type='range']::-moz-range-track {
+  background: #c1d3cd;
 }
 
 .start-title {
@@ -974,6 +1076,7 @@ input[type='range']:active::-webkit-slider-thumb {
 /* 主菜单卡片：把所有内容收进一块玻璃面板里，视觉上有个中心 */
 .menu-card {
   display: flex;
+  flex-shrink: 0;
   flex-direction: column;
   align-items: center;
   gap: 14px;
@@ -1203,6 +1306,7 @@ input[type='range']:active::-webkit-slider-thumb {
   }
 
   .status-panel {
+    top: 78px;
     width: 168px;
     font-size: 11px;
     padding: 8px 10px;
@@ -1215,6 +1319,14 @@ input[type='range']:active::-webkit-slider-thumb {
 
   .camera-preview {
     width: 160px;
+  }
+
+  .camera-preview.compact {
+    display: none;
+  }
+
+  .hints.pose-hints {
+    bottom: 150px;
   }
 
   .settings {

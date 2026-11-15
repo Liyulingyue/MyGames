@@ -18,6 +18,7 @@ export class KeyboardController {
   attach(): () => void {
     const onDown = (e: KeyboardEvent) => {
       if (e.repeat) return
+      if (e.target && (e.target as HTMLElement).closest?.('button, input, select, textarea, [contenteditable="true"]')) return
       this.keys.add(e.key.toLowerCase())
       if (e.key === ' ') e.preventDefault()
     }
@@ -61,6 +62,10 @@ export class KeyboardController {
       return true
     }
     return false
+  }
+
+  clearKeys(): void {
+    this.keys.clear()
   }
 
   reset(): void {

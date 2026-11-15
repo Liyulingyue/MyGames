@@ -3,6 +3,7 @@ import { PingPongGame } from './core/game.ts'
 import { AI_PRESETS, PLAYER, TARGET_SCORE } from './core/constants.ts'
 import type { Phase, Side } from './core/types.ts'
 import type { GameRenderer } from './render/renderer.ts'
+import type { Environment } from './render/scene.ts'
 import { CAMERA_LIMITS, DEFAULT_CAMERA, VIEW, checkFrame, type CameraPose } from './render/view.ts'
 import { PoseTracker, isVisible } from './input/poseTracker.ts'
 import type { MotionSource, PoseFrame, PoseLoadProgress } from './input/poseTracker.ts'
@@ -159,6 +160,7 @@ export default function App() {
   const [swingThreshold, setSwingThreshold] = useState<number>(PLAYER.swingThreshold)
   const [slowMotion, setSlowMotion] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
+  const [confirmExit, setConfirmExit] = useState(false)
   /** 左上角状态面板是否展开（折叠起来只剩一行，游戏时更清爽） */
   const [showStatus, setShowStatus] = useState(true)
   const [showPoseOverlay, setShowPoseOverlay] = useState(true)
@@ -181,6 +183,7 @@ export default function App() {
   const [displaySize, setDisplaySize] = useState(1)
   /** 相机位姿：位置 (x/y/z) + 俯角，用户可调（范围受限） */
   const [cameraPose, setCameraPose] = useState<CameraPose>({ ...DEFAULT_CAMERA })
+  const [environment, setEnvironment] = useState<Environment>('bright')
   /** 画布宽高比：给"画面检查"诊断用 */
   const [viewAspect, setViewAspect] = useState(VIEW.referenceAspect)
   /** 用户是否手动调过球速：没调过的话，切到体感模式会自动用更慢的球 */
@@ -202,6 +205,8 @@ export default function App() {
   const overlayRef = useRef<HTMLCanvasElement>(null)
   /** 结算页的「再来一局」按钮：结算后自动聚焦，回车直接能重开 */
   const restartBtnRef = useRef<HTMLButtonElement>(null)
+  const settingsBtnRef = useRef<HTMLButtonElement>(null)
+  const exitDialogRef = useRef<HTMLDialogElement>(null)
 
   const gameRef = useRef<PingPongGame | null>(null)
   const rendererRef = useRef<GameRenderer | null>(null)
@@ -212,6 +217,8 @@ export default function App() {
   const mouseRef = useRef<MouseController | null>(null)
   const soundRef = useRef<SoundEngine | null>(null)
   const cameraSetupPromiseRef = useRef<Promise<boolean> | null>(null)
+  const pendingTrackerRef = useRef<PoseTracker | null>(null)
+  const cameraGenerationRef = useRef(0)
 
   // 放进 ref，主循环里就不用依赖 state 变化而重启
   const inputModeRef = useRef<InputMode>(inputMode)
@@ -226,6 +233,8 @@ export default function App() {
   /** 取景设置：新开一局时新建的渲染器要沿用当前设置 */
   const displaySizeRef = useRef(displaySize)
   const cameraPoseRef = useRef(cameraPose)
+  const environmentRef = useRef(environment)
+  const pausedRef = useRef(showSettings)
   /** 开发调试用：注入的合成姿态帧（null = 用真实摄像头） */
   const devPoseRef = useRef<PoseFrame | null>(null)
   /** setupCamera 定义在 switchInputMode 之后，用 ref 打破循环依赖 */
@@ -240,6 +249,8 @@ export default function App() {
   autoMoveRef.current = autoMove
   autoSwingRef.current = autoSwing
   swingSourceRef.current = swingSource
+  pausedRef.current = showSettings
+  environmentRef.current = environment
 
   /**
    * 切换输入方式。
@@ -302,11 +313,21 @@ export default function App() {
     return soundRef.current
   }, [])
 
+  const attachCameraPreview = useCallback((video: HTMLVideoElement) => {
+    if (!previewRef.current) return
+    previewRef.current.appendChild(video)
+    video.style.width = '100%'
+    video.style.height = '100%'
+    video.style.objectFit = 'cover'
+    video.style.transform = 'scaleX(-1)'
+  }, [])
+
   /** 启动摄像头与姿态模型。成功返回 true，失败返回 false（已自动回退到键盘模式） */
   const setupCamera = useCallback((): Promise<boolean> => {
     if (trackerRef.current) return Promise.resolve(true)
     if (cameraSetupPromiseRef.current) return cameraSetupPromiseRef.current
 
+    const generation = cameraGenerationRef.current
     const setup = async (): Promise<boolean> => {
       setBooting(true)
       setBootError(null)
@@ -315,24 +336,26 @@ export default function App() {
       let tracker: PoseTracker | null = null
       try {
         tracker = new PoseTracker()
-        await tracker.init((progress) => setLoadProgress(progress))
+        pendingTrackerRef.current = tracker
+        await tracker.init((progress) => {
+          if (generation === cameraGenerationRef.current) setLoadProgress(progress)
+        })
+        if (generation !== cameraGenerationRef.current) return false
         setLoadProgress({ stage: 'camera', ratio: null })
         const video = await tracker.startCamera()
+        if (generation !== cameraGenerationRef.current) {
+          tracker.close()
+          return false
+        }
         trackerRef.current = tracker
 
-        // 把摄像头画面挂到预览容器里
-        if (previewRef.current) {
-          previewRef.current.appendChild(video)
-          video.style.width = '100%'
-          video.style.height = '100%'
-          video.style.objectFit = 'cover'
-          video.style.transform = 'scaleX(-1)'
-        }
+        attachCameraPreview(video)
 
         setHud((h) => ({ ...h, cameraState: 'ready', cameraError: null }))
         return true
       } catch (err) {
         tracker?.close()
+        if (generation !== cameraGenerationRef.current) return false
         const message = err instanceof Error ? err.message : String(err)
         setBootError(`摄像头 / 模型初始化失败：${message}\n已自动切换到键盘模式，可以先开始游戏。`)
         // 游戏中途切到体感模式失败时，错误要显示在 HUD 上（菜单上的提示看不到）
@@ -340,16 +363,19 @@ export default function App() {
         switchInputMode('keyboard')
         return false
       } finally {
-        cameraSetupPromiseRef.current = null
-        setBooting(false)
-        setLoadProgress(null)
+        if (generation === cameraGenerationRef.current) {
+          pendingTrackerRef.current = null
+          cameraSetupPromiseRef.current = null
+          setBooting(false)
+          setLoadProgress(null)
+        }
       }
     }
 
     const promise = setup()
     cameraSetupPromiseRef.current = promise
     return promise
-  }, [switchInputMode])
+  }, [switchInputMode, attachCameraPreview])
 
   cameraSetupRef.current = setupCamera
 
@@ -375,6 +401,7 @@ export default function App() {
     }
     ensureKeyboard()
     ensureDetector()
+    setShowSettings(false)
     setScreen('playing')
   }, [setupCamera, ensureKeyboard, ensureDetector, ensureSound])
 
@@ -395,6 +422,15 @@ export default function App() {
 
   /** 结束这一局，回到主菜单 */
   const backToMenu = useCallback(() => {
+    cameraGenerationRef.current++
+    pendingTrackerRef.current?.close()
+    pendingTrackerRef.current = null
+    trackerRef.current?.close()
+    trackerRef.current = null
+    cameraSetupPromiseRef.current = null
+    setBooting(false)
+    setLoadProgress(null)
+    setConfirmExit(false)
     setScreen('menu')
     setShowSettings(false)
     setHud(INITIAL_HUD)
@@ -426,6 +462,10 @@ export default function App() {
     // 新渲染器要沿用当前的取景设置（重开一局也不丢）
     renderer.setDisplaySize(displaySizeRef.current)
     renderer.setCameraPose(cameraPoseRef.current)
+    renderer.setEnvironment(environmentRef.current)
+
+    const video = trackerRef.current?.videoElement
+    if (video) attachCameraPreview(video)
 
     // 鼠标：mousemove 挂在 window 上（移出画布也继续跟踪），
     // mousedown 挂在画布容器上（点到 HUD 按钮时不要误挥拍）
@@ -608,7 +648,17 @@ export default function App() {
 
     const loop = (now: number) => {
       const dt = Math.min((now - last) / 1000, 0.05)
+      const frameElapsed = now - last
       last = now
+
+      if (pausedRef.current) {
+        mouse.consumeSwing()
+        ensureKeyboard().clearKeys()
+        if (messageUntil) messageUntil += frameElapsed
+        renderer.render()
+        raf = requestAnimationFrame(loop)
+        return
+      }
 
       // ---- 输入 ----
       // 鼠标的目标与挥拍请求每帧都取一次：即使当前不是鼠标模式，
@@ -764,7 +814,20 @@ export default function App() {
       rendererRef.current = null
       gameRef.current = null
     }
-  }, [screen, ensureKeyboard, ensureDetector, ensureMouse, ensureSound])
+  }, [screen, ensureKeyboard, ensureDetector, ensureMouse, ensureSound, attachCameraPreview])
+
+  useEffect(() => {
+    keyboardRef.current?.clearKeys()
+    mouseRef.current?.consumeSwing()
+    detectorRef.current?.reset()
+  }, [showSettings])
+
+  useEffect(() => {
+    const dialog = exitDialogRef.current
+    if (!confirmExit || !dialog) return
+    dialog.showModal()
+    return () => dialog.close()
+  }, [confirmExit])
 
   // 难度 / 慢动作实时生效（不重开一局）
   useEffect(() => {
@@ -805,11 +868,22 @@ export default function App() {
       // 焦点在按钮/滑块里时，回车交给控件自己处理，避免重复触发
       const inControl = !!target?.closest?.('button, input, select, textarea')
       if (e.key === 'Escape') {
-        if (showSettings) setShowSettings(false)
+        if (confirmExit) {
+          e.preventDefault()
+          exitDialogRef.current?.close()
+          setConfirmExit(false)
+          setShowSettings(false)
+          settingsBtnRef.current?.focus()
+          return
+        }
+        if (showSettings) {
+          setShowSettings(false)
+          settingsBtnRef.current?.focus()
+        }
         else if (hud.gameOver) backToMenu()
         return
       }
-      if (e.key !== 'Enter' || inControl) return
+      if (e.key !== 'Enter' || inControl || showSettings) return
       if (hud.gameOver) {
         e.preventDefault()
         restartGame()
@@ -819,10 +893,11 @@ export default function App() {
       }
     }
     const onPointerDown = (e: MouseEvent) => {
-      if (!showSettings) return
+      if (!showSettings || confirmExit) return
       const target = e.target as HTMLElement | null
       // 点面板内部或齿轮按钮都不关
-      if (target?.closest?.('.settings, .settings-toggle')) return
+      if (target?.closest?.('.settings, .settings-toggle, .menu-settings')) return
+      mouseRef.current?.consumeSwing()
       setShowSettings(false)
     }
     window.addEventListener('keydown', onKey)
@@ -831,7 +906,7 @@ export default function App() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('mousedown', onPointerDown)
     }
-  }, [showSettings, hud.gameOver, screen, backToMenu, restartGame, startGame])
+  }, [showSettings, confirmExit, hud.gameOver, screen, backToMenu, restartGame, startGame])
 
   // 音效开关 / 音量实时生效
   useEffect(() => {
@@ -880,6 +955,10 @@ export default function App() {
     rendererRef.current?.setCameraPose(cameraPose)
   }, [cameraPose])
 
+  useEffect(() => {
+    rendererRef.current?.setEnvironment(environment)
+  }, [environment])
+
   // 记录画布宽高比：窄屏要开大镜头，画面检查也按这个比例算
   useEffect(() => {
     const el = containerRef.current
@@ -898,6 +977,9 @@ export default function App() {
   // 退出时释放摄像头
   useEffect(() => {
     return () => {
+      cameraGenerationRef.current++
+      pendingTrackerRef.current?.close()
+      pendingTrackerRef.current = null
       trackerRef.current?.close()
       trackerRef.current = null
     }
@@ -937,6 +1019,8 @@ export default function App() {
     : frameCheck.cameraOk
       ? { text: '被显示尺寸裁掉了', cls: 'warn' }
       : { text: '相机出画了', cls: 'bad' }
+
+  const exitScore = gameRef.current?.state.score ?? hud.score
 
   /** 相机滑块的定义（范围来自 CAMERA_LIMITS） */
   const cameraSliders: {
@@ -1011,11 +1095,12 @@ export default function App() {
   })()
 
   return (
-    <div className="app">
+    <div className={`app ${screen === 'menu' && environment === 'bright' ? 'menu-bright' : ''}`}>
       <div className="canvas-host" ref={containerRef} />
 
-      {screen === 'playing' && (
-        <div className="hud">
+      <div className="hud">
+        {screen === 'playing' && (
+          <>
           <div className="scoreboard glass">
             <div className="score-side player">
               <span className="score-label">你</span>
@@ -1165,7 +1250,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="hints glass">
+          <div className={`hints glass ${inputMode === 'pose' ? 'pose-hints' : ''}`}>
             {inputMode === 'pose' ? (
               <>左右移动身体调整球拍 · 上下快速挥动手腕击球</>
             ) : inputMode === 'mouse' ? (
@@ -1177,19 +1262,41 @@ export default function App() {
               </>
             )}
           </div>
+          </>
+        )}
 
-          <button
-            className={`settings-toggle ${showSettings ? 'active' : ''}`}
-            onClick={() => setShowSettings((v) => !v)}
-            aria-label="设置"
-            title="设置（Esc 关闭）"
-          >
-            ⚙
-          </button>
+          {screen === 'playing' && (
+            <button
+              ref={settingsBtnRef}
+              className={`settings-toggle ${showSettings ? 'active' : ''}`}
+              onClick={() => setShowSettings((v) => !v)}
+              aria-label="设置"
+              aria-expanded={showSettings}
+              title="设置（Esc 关闭）"
+            >
+              ⚙ 设置
+            </button>
+          )}
 
           {showSettings && (
             <div className="settings glass" role="dialog" aria-label="设置">
-              <h3>设置</h3>
+              <div className="settings-header">
+                <h3>{screen === 'playing' ? '设置 · 比赛已暂停' : '游戏设置'}</h3>
+                <button
+                  className="mini-btn"
+                  onClick={() => {
+                    setShowSettings(false)
+                    settingsBtnRef.current?.focus()
+                  }}
+                >
+                  关闭设置
+                </button>
+              </div>
+              {screen === 'playing' && (
+                <button className="ghost-btn settings-home" onClick={() => setConfirmExit(true)}>
+                  返回首页
+                </button>
+              )}
 
               <div className="setting-group">
                 <div className="setting-group-title">操作</div>
@@ -1302,6 +1409,14 @@ export default function App() {
 
               <div className="setting-group">
                 <div className="setting-group-title">画面</div>
+
+                <div className="setting">
+                  <div className="setting-label"><span>场馆环境</span></div>
+                  <div className="seg">
+                    <button className={environment === 'bright' ? 'active' : ''} aria-pressed={environment === 'bright'} onClick={() => setEnvironment('bright')}>明亮球室</button>
+                    <button className={environment === 'night' ? 'active' : ''} aria-pressed={environment === 'night'} onClick={() => setEnvironment('night')}>夜间球场</button>
+                  </div>
+                </div>
 
                 <div className="setting">
                   <div className="setting-label">
@@ -1447,18 +1562,52 @@ export default function App() {
                 </div>
               </div>
 
-              <button
-                className="start-btn"
-                style={{ width: '100%', marginTop: 6, padding: '10px 0', fontSize: 14 }}
-                onClick={() => {
-                  restartGame()
-                  setShowSettings(false)
-                }}
-              >
-                重新开始
-              </button>
+              {screen === 'playing' && (
+                <button
+                  className="start-btn"
+                  style={{ width: '100%', marginTop: 6, padding: '10px 0', fontSize: 14 }}
+                  onClick={() => {
+                    restartGame()
+                    setShowSettings(false)
+                  }}
+                >
+                  重新开始
+                </button>
+              )}
             </div>
           )}
+
+          <dialog
+            ref={exitDialogRef}
+            className="exit-dialog"
+            aria-labelledby="exit-title"
+            aria-describedby="exit-description"
+            onCancel={(event) => {
+              event.preventDefault()
+              exitDialogRef.current?.close()
+              setConfirmExit(false)
+              setShowSettings(false)
+              settingsBtnRef.current?.focus()
+            }}
+          >
+            <h2 id="exit-title">返回首页？</h2>
+            <p id="exit-description">当前比分 {exitScore.player} : {exitScore.opponent}，返回后本局进度将丢失。</p>
+            <div className="exit-actions">
+              <button
+                className="ghost-btn"
+                autoFocus
+                onClick={() => {
+                  exitDialogRef.current?.close()
+                  setConfirmExit(false)
+                  setShowSettings(false)
+                  settingsBtnRef.current?.focus()
+                }}
+              >
+                继续比赛
+              </button>
+              <button className="start-btn" onClick={backToMenu}>确认返回</button>
+            </div>
+          </dialog>
 
           {hud.gameOver && (
             <div className="gameover">
@@ -1487,8 +1636,7 @@ export default function App() {
               </div>
             </div>
           )}
-        </div>
-      )}
+      </div>
 
       {screen === 'menu' && (
         <div className="start-overlay">
@@ -1567,6 +1715,15 @@ export default function App() {
 
             <button className="start-btn" onClick={startGame} disabled={booting}>
               {booting ? '正在准备游戏…' : '开始游戏'}
+            </button>
+
+            <button
+              ref={settingsBtnRef}
+              className="ghost-btn menu-settings"
+              onClick={() => setShowSettings((v) => !v)}
+              aria-expanded={showSettings}
+            >
+              ⚙ 游戏设置
             </button>
 
             <p className="start-footnote">

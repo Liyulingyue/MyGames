@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { PADDLE, TABLE } from '../core/constants.ts'
 import { DEFAULT_CAMERA, VIEW, resolveCamera } from './view.ts'
 
+export type Environment = 'bright' | 'night'
+
 /** 球台台面的贴图：按国际乒联标准画白线 */
 export function createTableTexture(): THREE.CanvasTexture {
   const W = 1024
@@ -88,6 +90,7 @@ export function createScene(): {
   tableTop: THREE.Mesh
   net: THREE.Mesh
   opponent: THREE.Group
+  setEnvironment: (environment: Environment) => void
 } {
   const scene = new THREE.Scene()
   scene.background = new THREE.Color('#0b1020')
@@ -101,7 +104,8 @@ export function createScene(): {
   camera.lookAt(initial.target.x, initial.target.y, initial.target.z)
 
   // —— 灯光 ——
-  scene.add(new THREE.HemisphereLight('#bcd4ff', '#2a2118', 0.85))
+  const ambient = new THREE.HemisphereLight('#bcd4ff', '#2a2118', 0.85)
+  scene.add(ambient)
 
   const key = new THREE.DirectionalLight('#ffffff', 1.5)
   key.position.set(2.4, 4.2, -1.6)
@@ -126,14 +130,48 @@ export function createScene(): {
   scene.add(lamp)
 
   // —— 地板 ——
+  const floorMaterial = new THREE.MeshStandardMaterial({ color: '#1b2340', roughness: 0.95, metalness: 0 })
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(24, 24),
-    new THREE.MeshStandardMaterial({ color: '#1b2340', roughness: 0.95, metalness: 0 }),
+    floorMaterial,
   )
   floor.rotation.x = -Math.PI / 2
   floor.position.y = TABLE.floorY
   floor.receiveShadow = true
   scene.add(floor)
+
+  const room = new THREE.Group()
+  const wallMaterial = new THREE.MeshStandardMaterial({ color: '#c4d2cc', roughness: 1, side: THREE.DoubleSide })
+  const trimMaterial = new THREE.MeshStandardMaterial({ color: '#76978d', roughness: 1, side: THREE.DoubleSide })
+  const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 4), wallMaterial)
+  backWall.position.set(0, TABLE.floorY + 2, 5)
+  room.add(backWall)
+  const backTrim = new THREE.Mesh(new THREE.PlaneGeometry(10, 0.85), trimMaterial)
+  backTrim.position.set(0, TABLE.floorY + 0.425, 4.99)
+  room.add(backTrim)
+  for (const x of [-5, 5]) {
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(10, 4), wallMaterial)
+    wall.rotation.y = Math.PI / 2
+    wall.position.set(x, TABLE.floorY + 2, 0)
+    room.add(wall)
+  }
+  scene.add(room)
+
+  const setEnvironment = (environment: Environment) => {
+    const bright = environment === 'bright'
+    const background = bright ? '#c4d2cc' : '#0b1020'
+    scene.background = new THREE.Color(background)
+    scene.fog = new THREE.Fog(background, 8, 22)
+    room.visible = bright
+    floorMaterial.color.set(bright ? '#a37b60' : '#1b2340')
+    ambient.color.set(bright ? '#ffffff' : '#bcd4ff')
+    ambient.groundColor.set(bright ? '#b9aa96' : '#2a2118')
+    ambient.intensity = bright ? 1.35 : 0.85
+    key.intensity = bright ? 2 : 1.5
+    fill.color.set(bright ? '#fff5e3' : '#88aaff')
+    fill.intensity = bright ? 0.8 : 0.45
+  }
+  setEnvironment('bright')
 
   // —— 球台 ——
   const tableGroup = new THREE.Group()
@@ -259,5 +297,5 @@ export function createScene(): {
   opponent.position.set(0, TABLE.surfaceY, PADDLE.opponentZ + 0.55)
   scene.add(opponent)
 
-  return { scene, camera, tableTop, net, opponent }
+  return { scene, camera, tableTop, net, opponent, setEnvironment }
 }

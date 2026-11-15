@@ -96,6 +96,14 @@ console.log('=== 键盘映射 ===')
   // 活动范围夹取
   const farRight = holdKey('ArrowRight', 120)
   approx('向右夹在活动范围内', farRight.x, -0.72, 1e-9)
+
+  const keyboard = new KeyboardController()
+  const detach = keyboard.attach()
+  dispatch('keydown', 'ArrowRight')
+  const beforePause = keyboard.update(0.1).x
+  keyboard.clearKeys()
+  approx('暂停清除按键但保留球拍目标', keyboard.update(0.1).x, beforePause)
+  detach()
 }
 
 console.log('\n=== 体感映射 ===')
@@ -663,6 +671,37 @@ console.log('\n=== 姿态模型下载进度 ===')
   const noLenOk = noLenEvents.length > 0 && noLenEvents.every((r) => r === null)
   if (!noLenOk) failures++
   console.log(`  ${noLenOk ? 'PASS' : 'FAIL'}  无 Content-Length 时 ratio 为 null`)
+}
+
+console.log('\n=== 摄像头退出清理 ===')
+{
+  const { PoseTracker } = await import('../src/input/poseTracker.ts')
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  let resolveStream!: (stream: MediaStream) => void
+  const pendingStream = new Promise<MediaStream>((resolve) => { resolveStream = resolve })
+  let stopped = 0
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { mediaDevices: { getUserMedia: () => pendingStream } },
+  })
+  try {
+    const tracker = new PoseTracker()
+    const opening = tracker.startCamera()
+    tracker.close()
+    resolveStream({ getTracks: () => [{ stop: () => { stopped++ } }] } as unknown as MediaStream)
+    let rejected = false
+    try {
+      await opening
+    } catch {
+      rejected = true
+    }
+    const ok = rejected && stopped === 1 && tracker.videoElement === null
+    if (!ok) failures++
+    console.log(`  ${ok ? 'PASS' : 'FAIL'}  退出后迟到的摄像头授权会停止采集`)
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'navigator', previous)
+    else Reflect.deleteProperty(globalThis, 'navigator')
+  }
 }
 
 console.log(failures === 0 ? '\n全部通过' : `\n失败 ${failures} 项`)

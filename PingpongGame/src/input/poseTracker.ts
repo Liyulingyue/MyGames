@@ -185,8 +185,9 @@ export async function downloadModelBytes(
   url: string,
   onProgress?: (progress: PoseLoadProgress) => void,
   fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
-  const response = await fetchImpl(url)
+  const response = await fetchImpl(url, { signal })
   if (!response.ok) {
     throw new Error(`姿态模型下载失败（HTTP ${response.status}）`)
   }
@@ -263,6 +264,8 @@ function withTimeout<T>(promise: Promise<T>, seconds: number, message: string): 
 export class PoseTracker {
   private landmarker: PoseLandmarkerType | null = null
   private stream: MediaStream | null = null
+  private closed = false
+  private readonly abortController = new AbortController()
   private video: HTMLVideoElement | null = null
   private lastVideoTime = -1
   private histories = createArmHistories()
@@ -306,16 +309,18 @@ export class PoseTracker {
       MODEL_TIMEOUT,
       'MediaPipe 运行时下载超时，请检查网络',
     )
+    if (this.closed) throw new Error('姿态追踪已关闭')
 
     const modelBytes = await withTimeout(
-      downloadModelBytes(MODEL_PATH, onProgress),
+      downloadModelBytes(MODEL_PATH, onProgress, fetch, this.abortController.signal),
       MODEL_TIMEOUT,
       '姿态模型下载超时，请检查网络',
     )
+    if (this.closed) throw new Error('姿态追踪已关闭')
 
     onProgress?.({ stage: 'engine', ratio: null })
-    this.landmarker = await withTimeout(
-      PoseLandmarker.createFromOptions(fileset, {
+    let abandoned = false
+    const pending = PoseLandmarker.createFromOptions(fileset, {
         baseOptions: {
           modelAssetBuffer: modelBytes,
           delegate: 'GPU',
@@ -325,10 +330,28 @@ export class PoseTracker {
         minPoseDetectionConfidence: 0.5,
         minPosePresenceConfidence: 0.5,
         minTrackingConfidence: 0.5,
-      }),
-      MODEL_TIMEOUT,
-      '姿态模型初始化超时，请检查网络或显卡驱动',
-    )
+      }).then((landmarker) => {
+        if (abandoned || this.closed) {
+          landmarker.close()
+          throw new Error('姿态追踪已关闭')
+        }
+        return landmarker
+      })
+    try {
+      const landmarker = await withTimeout(
+        pending,
+        MODEL_TIMEOUT,
+        '姿态模型初始化超时，请检查网络或显卡驱动',
+      )
+      if (this.closed) {
+        landmarker.close()
+        throw new Error('姿态追踪已关闭')
+      }
+      this.landmarker = landmarker
+    } catch (err) {
+      abandoned = true
+      throw err
+    }
   }
 
   /** 打开摄像头 */
@@ -337,18 +360,34 @@ export class PoseTracker {
       throw new Error('当前浏览器不支持摄像头采集')
     }
 
-    this.stream = await withTimeout(
-      navigator.mediaDevices
-        .getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-          audio: false,
-        })
-        .catch((err: unknown) => {
-          throw new Error(cameraErrorText(err))
-        }),
-      CAMERA_TIMEOUT,
-      '摄像头授权超时，请在浏览器地址栏允许摄像头权限',
-    )
+    let abandoned = false
+    const pending = navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      audio: false,
+    }).catch((err: unknown) => {
+      throw new Error(cameraErrorText(err))
+    }).then((stream) => {
+      if (abandoned || this.closed) {
+        stream.getTracks().forEach((track) => track.stop())
+        throw new Error('姿态追踪已关闭')
+      }
+      return stream
+    })
+    try {
+      const stream = await withTimeout(
+        pending,
+        CAMERA_TIMEOUT,
+        '摄像头授权超时，请在浏览器地址栏允许摄像头权限',
+      )
+      if (this.closed) {
+        stream.getTracks().forEach((track) => track.stop())
+        throw new Error('姿态追踪已关闭')
+      }
+      this.stream = stream
+    } catch (err) {
+      abandoned = true
+      throw err
+    }
 
     const video = document.createElement('video')
     video.playsInline = true
@@ -356,6 +395,7 @@ export class PoseTracker {
     video.srcObject = this.stream
     await video.play()
 
+    if (this.closed) throw new Error('姿态追踪已关闭')
     this.video = video
     return video
   }
@@ -397,6 +437,8 @@ export class PoseTracker {
   }
 
   close(): void {
+    this.closed = true
+    this.abortController.abort()
     this.stream?.getTracks().forEach((track) => track.stop())
     this.stream = null
     this.landmarker?.close()

@@ -11,7 +11,7 @@
  *   6. 相机位姿可调：默认位姿复现原取景，改位姿只改画面、不改显示尺寸语义；
  *   7. 相机位姿在滑块范围内时，取景不会崩（球台不会整个跑出画面）。
  *
- * 纯数学，不依赖 DOM 和 Three.js。
+ * 取景测试使用纯数学；场馆切换测试使用最小 Canvas 桩。
  */
 
 import {
@@ -25,6 +25,8 @@ import {
   type Framing,
 } from '../src/render/view.ts'
 import { PADDLE, TABLE } from '../src/core/constants.ts'
+import { Color } from 'three'
+import { createScene } from '../src/render/scene.ts'
 
 let failures = 0
 
@@ -358,6 +360,38 @@ console.log('\n=== 画面检查（诊断）能给出一致的结果 ===')
     `  俯角 60° + 高 2.6m：球拍横向 ${steep.paddleX.toFixed(2)}，球拍纵向 ${steep.paddleBottom.toFixed(2)} ~ ${steep.paddleTop.toFixed(2)}`,
   )
   ok('极端位姿下诊断仍然是有限数', Number.isFinite(steep.paddleX) && Number.isFinite(steep.paddleTop))
+}
+
+console.log('\n=== 场馆环境切换 ===')
+{
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document')
+  const context = {
+    fillRect() {}, clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+    createLinearGradient() { return { addColorStop() {} } },
+  }
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: { createElement: () => ({ getContext: () => context }) },
+  })
+  try {
+    const built = createScene()
+    const background = () => built.scene.background instanceof Color
+      ? built.scene.background.getHexString()
+      : ''
+    const bright = background()
+    const objectCount = built.scene.children.length
+    const cameraPosition = built.camera.position.clone()
+    built.setEnvironment('night')
+    const night = background()
+    ok('默认明亮环境与夜间环境不同', bright !== night)
+    ok('切换不重建场景或改变相机位置',
+      built.scene.children.length === objectCount && built.camera.position.equals(cameraPosition))
+    built.setEnvironment('bright')
+    ok('切回明亮环境恢复原背景', background() === bright)
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'document', previous)
+    else Reflect.deleteProperty(globalThis, 'document')
+  }
 }
 
 console.log(failures === 0 ? '\n全部通过' : `\n失败 ${failures} 项`)

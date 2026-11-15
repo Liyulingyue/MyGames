@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { GameState } from '../core/game.ts'
 import { PADDLE, TABLE } from '../core/constants.ts'
-import { createScene } from './scene.ts'
+import { createScene, type Environment } from './scene.ts'
 import { applyPaddleTransform, createBall, createPaddle } from './meshes.ts'
 import {
   DEFAULT_CAMERA,
@@ -50,6 +50,7 @@ export class GameRenderer {
   private scene: THREE.Scene
   private camera: THREE.PerspectiveCamera
   private container: HTMLElement
+  private setSceneEnvironment: (environment: Environment) => void
 
   /** 当前生效的取景（随宽高比、显示尺寸和相机位姿变化） */
   private framing: Framing = fitFraming(1, 1)
@@ -80,6 +81,7 @@ export class GameRenderer {
     this.scene = built.scene
     this.camera = built.camera
     this.opponent = built.opponent
+    this.setSceneEnvironment = built.setEnvironment
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -184,6 +186,10 @@ export class GameRenderer {
   setCameraPose(pose: CameraPose): void {
     this.cameraPose = { ...pose }
     this.applyFraming(this.camera.aspect)
+  }
+
+  setEnvironment(environment: Environment): void {
+    this.setSceneEnvironment(environment)
   }
 
   /** 把游戏状态同步到场景 */
