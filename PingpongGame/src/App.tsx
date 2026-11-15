@@ -126,6 +126,7 @@ function Slider({
   onChange,
   defaultValue,
   title,
+  ariaLabel,
 }: {
   min: number
   max: number
@@ -135,6 +136,7 @@ function Slider({
   /** 传了就允许双击恢复到这个值 */
   defaultValue?: number
   title?: string
+  ariaLabel?: string
 }) {
   const pct = max > min ? ((value - min) / (max - min)) * 100 : 0
   return (
@@ -145,6 +147,7 @@ function Slider({
       step={step}
       value={value}
       title={title ?? (defaultValue !== undefined ? '双击恢复默认' : undefined)}
+      aria-label={ariaLabel}
       style={{ '--fill': `${Math.max(0, Math.min(100, pct))}%` } as CSSProperties}
       onChange={(e) => onChange(Number(e.target.value))}
       onDoubleClick={() => {
@@ -169,6 +172,8 @@ export default function App() {
   const [autoMove, setAutoMove] = useState(false)
   const [autoSwing, setAutoSwing] = useState(false)
   const [hitAssist, setHitAssist] = useState(true)
+  const [softAlign, setSoftAlign] = useState(false)
+  const [softAlignStrength, setSoftAlignStrength] = useState(0.6)
   /**
    * 体感模式下怎么击球。
    *
@@ -234,6 +239,8 @@ export default function App() {
   const autoMoveRef = useRef(autoMove)
   const autoSwingRef = useRef(autoSwing)
   const hitAssistRef = useRef(hitAssist)
+  const softAlignRef = useRef(softAlign)
+  const softAlignStrengthRef = useRef(softAlignStrength)
   const swingSourceRef = useRef(swingSource)
   /** 取景设置：新开一局时新建的渲染器要沿用当前设置 */
   const displaySizeRef = useRef(displaySize)
@@ -254,6 +261,8 @@ export default function App() {
   autoMoveRef.current = autoMove
   autoSwingRef.current = autoSwing
   hitAssistRef.current = hitAssist
+  softAlignRef.current = softAlign
+  softAlignStrengthRef.current = softAlignStrength
   swingSourceRef.current = swingSource
   pausedRef.current = showSettings
   environmentRef.current = environment
@@ -476,6 +485,8 @@ export default function App() {
       autoMove: autoMoveRef.current,
       autoSwing: autoSwingRef.current,
       hitAssist: hitAssistRef.current,
+      softAlign: softAlignRef.current,
+      softAlignStrength: softAlignStrengthRef.current,
     })
     gameRef.current = game
     game.start()
@@ -970,7 +981,9 @@ export default function App() {
     game.options.autoMove = autoMove
     game.options.autoSwing = autoSwing
     game.options.hitAssist = hitAssist
-  }, [timeScale, autoMove, autoSwing, hitAssist])
+    game.options.softAlign = softAlign
+    game.options.softAlignStrength = softAlignStrength
+  }, [timeScale, autoMove, autoSwing, hitAssist, softAlign, softAlignStrength])
 
   // 显示尺寸实时生效（只动相机，物理完全不受影响）
   useEffect(() => {
@@ -1152,6 +1165,7 @@ export default function App() {
               <span>对手：{difficulty === 'easy' ? '简单' : difficulty === 'normal' ? '普通' : '困难'}</span>
               <span>球速：{timeScale.toFixed(2)}x</span>
               <span>手动击球辅助：{hitAssist ? '开' : '关'}</span>
+              <span>软吸附：{softAlign ? autoMove ? '自动跟球优先' : `${Math.round(softAlignStrength * 100)}%` : '关'}</span>
               <span>音效：{soundOn ? `${Math.round(soundVolume * 100)}%` : '关闭'}</span>
               <p>静态预览不模拟对局；操作、球速和辅助效果需开始游戏体验。</p>
               {inputMode === 'pose' && <p>摄像头：{hud.cameraState === 'ready' ? '已就绪' : hud.cameraState === 'loading' ? '正在准备' : '未就绪'}</p>}
@@ -1585,6 +1599,34 @@ export default function App() {
                 </label>
                 <div className="setting-hint">
                   仍需自己走位和挥拍；适度放宽提前挥拍和拍面偏差。关闭后恢复原判定。
+                </div>
+
+                <label className="setting switch">
+                  <span>软吸附</span>
+                  <input
+                    type="checkbox"
+                    checked={softAlign}
+                    onChange={(e) => setSoftAlign(e.target.checked)}
+                  />
+                </label>
+                <div className="setting-hint">
+                  接近来球位置时轻微引导球拍，仍可自由移动；辅助移动开启时优先自动跟球。
+                </div>
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>软吸附强度</span>
+                    <b>{Math.round(softAlignStrength * 100)}%</b>
+                  </div>
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={softAlignStrength}
+                    defaultValue={0.6}
+                    ariaLabel="软吸附强度"
+                    onChange={setSoftAlignStrength}
+                  />
+                  <div className="setting-hint">开启软吸附后生效；0% 不产生引导。</div>
                 </div>
 
                 <label className="setting switch">

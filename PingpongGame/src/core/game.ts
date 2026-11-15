@@ -63,6 +63,9 @@ export interface GameOptions {
   autoSwing?: boolean
   /** 保留手动挥拍，放宽挥拍时间和拍面偏差 */
   hitAssist?: boolean
+  /** 仅在目标靠近来球时轻微引导球拍，强度为 0～1 */
+  softAlign?: boolean
+  softAlignStrength?: number
 }
 
 export interface GameState {
@@ -131,6 +134,8 @@ export class PingPongGame {
       autoMove: options.autoMove ?? false,
       autoSwing: options.autoSwing ?? false,
       hitAssist: options.hitAssist ?? false,
+      softAlign: options.softAlign ?? false,
+      softAlignStrength: options.softAlignStrength ?? 0.6,
     }
 
     this.rng = createRng(this.options.seed)
@@ -397,7 +402,23 @@ export class PingPongGame {
    * 球不在来路上时保持玩家自己设定的位置。
    */
   private targetPaddleX(): number {
-    if (!this.options.autoMove) return this.playerTargetX
+    if (!this.options.autoMove) {
+      const s = this.state
+      const b = s.ball
+      if (!this.options.softAlign || s.phase !== 'rally' || !s.playerWindowOpen || s.lastHitter !== 'opponent' ||
+          b.vel.z >= -1e-4 || b.pos.z < PADDLE.homeZ) return this.playerTargetX
+
+      const eta = (PADDLE.homeZ - b.pos.z) / b.vel.z
+      if (eta >= 0.6) return this.playerTargetX
+
+      // 落台后 X/Z 同比受阻力衰减，速度比可用于估算穿过拍面的横向位置。
+      const interceptX = b.pos.x + (PADDLE.homeZ - b.pos.z) * b.vel.x / b.vel.z
+      const delta = interceptX - this.playerTargetX
+      const distanceWeight = Math.max(0, 1 - Math.abs(delta) / 0.4)
+      const timeWeight = clamp((0.6 - eta) / 0.3, 0, 1)
+      const strength = clamp(this.options.softAlignStrength, 0, 1) * 0.8
+      return clamp(this.playerTargetX + delta * distanceWeight * timeWeight * strength, -PADDLE.rangeX, PADDLE.rangeX)
+    }
     const b = this.state.ball
     if (b.vel.z >= 0 || b.pos.z < PADDLE.homeZ - 0.35) return this.playerTargetX
     return clamp(b.pos.x, -PADDLE.rangeX, PADDLE.rangeX)

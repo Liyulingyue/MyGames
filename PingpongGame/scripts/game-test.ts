@@ -127,6 +127,68 @@ console.log('\n=== 固定来球对比 ===')
   console.log(`  首球对比：共同挥拍 ${attempts}/30，原判定 ${originalHits}，辅助 ${assistedHits}`)
 }
 
+console.log('\n=== 软吸附 ===')
+{
+  function move(options: {
+    enabled?: boolean
+    strength?: number
+    target?: number
+    ballX?: number
+    velocityX?: number
+    velocityZ?: number
+    gap?: number
+    windowOpen?: boolean
+    autoMove?: boolean
+  } = {}): { x: number; swung: boolean } {
+    const game = new PingPongGame({
+      softAlign: options.enabled ?? true,
+      softAlignStrength: options.strength ?? 0.6,
+      autoMove: options.autoMove ?? false,
+      slowMotion: false,
+      autoHeight: false,
+    })
+    game.start()
+    const s = game.state
+    s.phase = 'rally'
+    s.lastHitter = 'opponent'
+    s.bounces = { player: 1, opponent: 0 }
+    s.playerWindowOpen = options.windowOpen ?? true
+    s.ball.pos = { x: options.ballX ?? 0.2, y: 0.6, z: PADDLE.homeZ + (options.gap ?? 0.5) }
+    s.ball.vel = { x: options.velocityX ?? 0, y: 0, z: options.velocityZ ?? -2 }
+    const target = options.target ?? 0
+    s.playerPaddle.x = target
+    game.setPlayerTarget(target)
+    let swung = false
+    for (let i = 0; i < 30; i++) {
+      const events = game.step(FIXED_DT)
+      if (events.some((event) => event.type === 'swing')) swung = true
+    }
+    return { x: s.playerPaddle.x, swung }
+  }
+
+  const off = move({ enabled: false })
+  const soft = move()
+  const full = move({ strength: 1 })
+  assert('关闭或强度为零时不改变玩家目标', off.x === 0 && move({ strength: 0 }).x === 0)
+  assert('接近来球时轻微引导（默认强度最多 4.8cm）', soft.x > 0.02 && soft.x <= 0.048001)
+  assert('提高强度增加引导但不超过偏差', full.x > soft.x && full.x < 0.2)
+  assert('软吸附不会替玩家挥拍', !soft.swung)
+  assert('未落台、球远离或来球尚远时不引导',
+    move({ windowOpen: false }).x === 0 &&
+      move({ velocityZ: 2 }).x === 0 &&
+      move({ gap: 1.5 }).x === 0)
+  assert('目标远离来球时不引导', move({ target: -0.3 }).x === -0.3)
+  assert('按预测穿越点引导而不是跟踪当前球的位置',
+    move({ ballX: -0.1, velocityX: 0.6 }).x > 0)
+  assert('自动跟球优先于软吸附',
+    Math.abs(move({ autoMove: true }).x - move({ autoMove: true, enabled: false }).x) < 1e-9)
+
+  const positions = [-0.3, -0.15, 0, 0.1, 0.2, 0.3, 0.45, 0.6]
+    .map((target) => move({ target, strength: 1 }).x)
+  assert('玩家持续移动时不会被吸附反向拖拽',
+    positions.every((x, index) => index === 0 || x > positions[index - 1]))
+}
+
 // ---------------------------------------------------------------- 1. 停顿不锁死
 console.log('=== 得分停顿期间球拍仍跟随输入 ===')
 {
