@@ -165,6 +165,76 @@ const CAMERA_TIMEOUT = 30
 /** 模型 / wasm 下载等待上限（秒） */
 const MODEL_TIMEOUT = 120
 
+export type PoseInitStage = 'wasm' | 'model' | 'engine' | 'camera'
+
+export interface PoseLoadProgress {
+  stage: PoseInitStage
+  /** 0~1；非下载阶段或服务端未返回 Content-Length 时为 null */
+  ratio: number | null
+  loadedBytes?: number
+  totalBytes?: number
+}
+
+/**
+ * 流式下载模型文件并实时上报下载进度。
+ *
+ * MediaPipe 内部直接传 URL 时外部拿不到下载进度；
+ * 自己用 fetch + ReadableStream 读取字节后，再通过 modelAssetBuffer 传入，
+ * 就能给前端提供准确的进度条反馈。
+ */
+export async function downloadModelBytes(
+  url: string,
+  onProgress?: (progress: PoseLoadProgress) => void,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Uint8Array> {
+  const response = await fetchImpl(url)
+  if (!response.ok) {
+    throw new Error(`姿态模型下载失败（HTTP ${response.status}）`)
+  }
+
+  const contentLength = Number(response.headers.get('Content-Length') ?? 0)
+  const totalBytes = Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined
+
+  if (!response.body) {
+    const buffer = new Uint8Array(await response.arrayBuffer())
+    onProgress?.({
+      stage: 'model',
+      ratio: 1,
+      loadedBytes: buffer.byteLength,
+      totalBytes: totalBytes ?? buffer.byteLength,
+    })
+    return buffer
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let loadedBytes = 0
+
+  onProgress?.({ stage: 'model', ratio: totalBytes ? 0 : null, loadedBytes: 0, totalBytes })
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!value || value.byteLength === 0) continue
+    chunks.push(value)
+    loadedBytes += value.byteLength
+    onProgress?.({
+      stage: 'model',
+      ratio: totalBytes ? Math.min(1, loadedBytes / totalBytes) : null,
+      loadedBytes,
+      totalBytes,
+    })
+  }
+
+  const result = new Uint8Array(loadedBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    result.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return result
+}
+
 /**
  * 给异步操作加超时（seconds 为秒）。
  * 超时后原 promise 仍会继续跑，只是我们不再等它。
@@ -229,16 +299,25 @@ export class PoseTracker {
   }
 
   /** 初始化模型（需要网络，wasm 与模型都从 CDN 加载） */
-  async init(): Promise<void> {
+  async init(onProgress?: (progress: PoseLoadProgress) => void): Promise<void> {
+    onProgress?.({ stage: 'wasm', ratio: null })
     const fileset = await withTimeout(
       FilesetResolver.forVisionTasks(WASM_PATH),
       MODEL_TIMEOUT,
       'MediaPipe 运行时下载超时，请检查网络',
     )
+
+    const modelBytes = await withTimeout(
+      downloadModelBytes(MODEL_PATH, onProgress),
+      MODEL_TIMEOUT,
+      '姿态模型下载超时，请检查网络',
+    )
+
+    onProgress?.({ stage: 'engine', ratio: null })
     this.landmarker = await withTimeout(
       PoseLandmarker.createFromOptions(fileset, {
         baseOptions: {
-          modelAssetPath: MODEL_PATH,
+          modelAssetBuffer: modelBytes,
           delegate: 'GPU',
         },
         runningMode: 'VIDEO',
@@ -248,7 +327,7 @@ export class PoseTracker {
         minTrackingConfidence: 0.5,
       }),
       MODEL_TIMEOUT,
-      '姿态模型下载超时，请检查网络',
+      '姿态模型初始化超时，请检查网络或显卡驱动',
     )
   }
 

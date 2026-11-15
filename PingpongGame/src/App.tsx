@@ -5,7 +5,7 @@ import type { Phase, Side } from './core/types.ts'
 import { GameRenderer } from './render/renderer.ts'
 import { CAMERA_LIMITS, DEFAULT_CAMERA, VIEW, checkFrame, type CameraPose } from './render/view.ts'
 import { PoseTracker, isVisible } from './input/poseTracker.ts'
-import type { MotionSource, PoseFrame } from './input/poseTracker.ts'
+import type { MotionSource, PoseFrame, PoseLoadProgress } from './input/poseTracker.ts'
 import { SwingDetector, paddleTargetFromPose, pickArmSample, handOf, isMouseSwing } from './input/swingDetector.ts'
 import type { SwingSource } from './input/swingDetector.ts'
 import { KeyboardController } from './input/keyboard.ts'
@@ -142,6 +142,7 @@ export default function App() {
   const [hud, setHud] = useState<HudState>(INITIAL_HUD)
   const [bootError, setBootError] = useState<string | null>(null)
   const [booting, setBooting] = useState(false)
+  const [loadProgress, setLoadProgress] = useState<PoseLoadProgress | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
@@ -248,10 +249,12 @@ export default function App() {
   const setupCamera = useCallback(async (): Promise<boolean> => {
     setBooting(true)
     setBootError(null)
+    setLoadProgress({ stage: 'wasm', ratio: null })
     setHud((h) => ({ ...h, cameraState: 'loading', cameraError: null }))
     try {
       const tracker = new PoseTracker()
-      await tracker.init()
+      await tracker.init((progress) => setLoadProgress(progress))
+      setLoadProgress({ stage: 'camera', ratio: null })
       const video = await tracker.startCamera()
       trackerRef.current = tracker
 
@@ -275,6 +278,7 @@ export default function App() {
       return false
     } finally {
       setBooting(false)
+      setLoadProgress(null)
     }
   }, [switchInputMode])
 
@@ -960,7 +964,7 @@ export default function App() {
                   <div className="status-error">{hud.cameraError}</div>
                 )}
                 {hud.cameraState === 'loading' && (
-                  <div className="status-error">正在加载姿态模型…</div>
+                  <LoadProgressBar progress={loadProgress} compact />
                 )}
               </>
             )}
@@ -1341,8 +1345,10 @@ export default function App() {
 
           {bootError && <div className="start-error">{bootError}</div>}
 
+          {booting && <LoadProgressBar progress={loadProgress} />}
+
           <button className="start-btn" onClick={startGame} disabled={booting}>
-            {booting ? '正在加载姿态模型…' : '开始游戏'}
+            {booting ? '正在准备体感模式…' : '开始游戏'}
           </button>
 
           <p className="start-sub" style={{ fontSize: 12, opacity: 0.7 }}>
@@ -1350,6 +1356,62 @@ export default function App() {
           </p>
         </div>
       )}
+    </div>
+  )
+}
+
+function formatMb(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1)
+}
+
+function formatLoadLabel(progress: PoseLoadProgress | null): { label: string; detail: string } {
+  if (!progress) return { label: '正在准备姿态识别…', detail: '' }
+  switch (progress.stage) {
+    case 'wasm':
+      return { label: '1/4 加载运行时…', detail: '' }
+    case 'model': {
+      const pct = progress.ratio !== null ? `${Math.round(progress.ratio * 100)}%` : ''
+      const size =
+        progress.loadedBytes !== undefined && progress.totalBytes !== undefined
+          ? `${formatMb(progress.loadedBytes)} / ${formatMb(progress.totalBytes)} MB`
+          : progress.loadedBytes !== undefined
+            ? `${formatMb(progress.loadedBytes)} MB`
+            : ''
+      return {
+        label: `2/4 下载姿态模型${pct ? ` ${pct}` : '…'}`,
+        detail: size,
+      }
+    }
+    case 'engine':
+      return { label: '3/4 初始化识别引擎…', detail: '' }
+    case 'camera':
+      return { label: '4/4 等待摄像头授权…', detail: '' }
+  }
+}
+
+function LoadProgressBar({
+  progress,
+  compact = false,
+}: {
+  progress: PoseLoadProgress | null
+  compact?: boolean
+}) {
+  const { label, detail } = formatLoadLabel(progress)
+  const determinate = progress?.stage === 'model' && progress.ratio !== null
+  const percent = determinate ? Math.round((progress.ratio ?? 0) * 100) : 0
+
+  return (
+    <div className={`load-progress${compact ? ' compact' : ''}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={determinate ? percent : undefined}>
+      <div className="load-progress-text">
+        <span>{label}</span>
+        {detail && <span>{detail}</span>}
+      </div>
+      <div className="load-progress-track">
+        <div
+          className={`load-progress-fill${determinate ? '' : ' indeterminate'}`}
+          style={determinate ? { width: `${percent}%` } : undefined}
+        />
+      </div>
     </div>
   )
 }
