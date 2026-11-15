@@ -118,13 +118,32 @@ export function checkPaddleOverlap(ball: Ball, paddle: Paddle): PaddleHit | null
   return { offsetX, offsetY, distance: d }
 }
 
-/** 挥拍判定：球心与拍心的 3D 距离是否在触及范围内 */
-export function checkSwingReach(ball: Ball, paddle: Paddle, reach: number = PADDLE.reach): PaddleHit | null {
+/**
+ * 挥拍命中判定。
+ *
+ * 球必须真的落在拍面上：
+ *   - 拍面平面内（XY），球心到拍心的距离不能超过 PADDLE.bladeReach
+ *   - 只有 Z 方向（球飞过拍面的那一下）留一点厚度 PADDLE.swingDepth
+ *
+ * 以前这里用的是"球心到拍心 29cm 的球形范围"，比拍面（半径 7.5cm）大得多，
+ * 于是球在离拍面还有十几二十厘米的地方就被判定为打中——
+ * 球看起来是凭空飞走的，而且落点可以远在台面之外。
+ */
+export function checkSwingReach(
+  ball: Ball,
+  paddle: Paddle,
+  depth: number = PADDLE.swingDepth,
+): PaddleHit | null {
   const offsetX = ball.pos.x - paddle.x
   const offsetY = ball.pos.y - paddle.y
   const offsetZ = ball.pos.z - paddle.z
+
+  // 拍面是 XY 平面上的一块圆盘
+  if (Math.hypot(offsetX, offsetY) > PADDLE.bladeReach) return null
+  // 挥拍扫过的厚度
+  if (Math.abs(offsetZ) > depth) return null
+
   const d = Math.hypot(offsetX, offsetY, offsetZ)
-  if (d > reach) return null
   return { offsetX, offsetY, distance: d }
 }
 

@@ -1,5 +1,5 @@
 import type { AIConfig } from './constants.ts'
-import { PADDLE, TABLE } from './constants.ts'
+import { PADDLE } from './constants.ts'
 import type { Ball, Paddle } from './types.ts'
 import { checkSwingReach, launchTo, movePaddleToward, predictBallAtZ } from './physics.ts'
 import { clamp, rand } from './vec3.ts'
@@ -53,8 +53,13 @@ export type AIAction =
   | { kind: 'hit'; velocity: { x: number; y: number; z: number }; targetX: number; targetZ: number; power: number }
   | { kind: 'miss' }
 
-/** AI 可接受的击球距离（比玩家宽松一些，保证 AI 能稳定回球） */
-const AI_REACH = 0.34
+/**
+ * AI 可接受的击球深度（米）。
+ *
+ * 球从拍面旁边掠过就算打中——比玩家稍宽松一点，保证 AI 能稳定回球，
+ * 但也必须贴着拍面，否则球会在半路就被打飞。
+ */
+const AI_DEPTH = PADDLE.swingDepth + 0.02
 
 export function updateAI(ai: AIState, ball: Ball, ctx: AIContext, dt: number): AIAction {
   const { rng, config, playerPaddle } = ctx
@@ -73,10 +78,12 @@ export function updateAI(ai: AIState, ball: Ball, ctx: AIContext, dt: number): A
     if (ai.predictionTimer <= 0) {
       ai.predictionTimer = 0.05
       const prediction = predictBallAtZ(ball, ai.paddle.z)
-      ai.targetX = clamp(prediction.pos.x, -TABLE.halfWidth, TABLE.halfWidth)
+      // 球拍中心不超出台面：拍面始终盖在台面上
+      ai.targetX = clamp(prediction.pos.x, -PADDLE.rangeX, PADDLE.rangeX)
       // 挡板高度跟随预测的球高度，模拟"抬手准备"
+      // 跟得紧一点：击球判定要求球真的落在拍面上，挡板高度差太多就够不着了
       const targetY = clamp(prediction.pos.y, 0.08, 0.5)
-      ai.paddle.y += (targetY - ai.paddle.y) * Math.min(1, dt * 12)
+      ai.paddle.y += (targetY - ai.paddle.y) * Math.min(1, dt * 24)
     }
   } else {
     ai.hasTarget = false
@@ -94,12 +101,12 @@ export function updateAI(ai: AIState, ball: Ball, ctx: AIContext, dt: number): A
     !ai.engaged &&
     ai.reactionTimer <= 0 &&
     approaching &&
-    ball.pos.z > ai.paddle.z - 0.32 &&
-    ball.pos.z < ai.paddle.z + 0.06
+    ball.pos.z > ai.paddle.z - AI_DEPTH &&
+    ball.pos.z < ai.paddle.z + AI_DEPTH
 
   if (!canHit) return { kind: 'none' }
 
-  const reach = checkSwingReach(ball, ai.paddle, AI_REACH)
+  const reach = checkSwingReach(ball, ai.paddle, AI_DEPTH)
   if (!reach) return { kind: 'none' }
 
   ai.engaged = true

@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "sim": "node --experimental-strip-types scripts/simulate.ts",
+    "analyze": "node --experimental-strip-types scripts/analyze_contact.ts",
     "test:physics": "node --experimental-strip-types scripts/physics-test.ts",
     "test:input": "node --experimental-strip-types scripts/input-test.ts",
     "test:game": "node --experimental-strip-types scripts/game-test.ts"

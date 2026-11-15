@@ -203,7 +203,7 @@ export class PingPongGame {
    * 高度改由游戏自动跟随球，见 autoPaddleHeight()。
    */
   setPlayerTarget(x: number): void {
-    this.playerTargetX = clamp(x, -0.78, 0.78)
+    this.playerTargetX = clamp(x, -PADDLE.rangeX, PADDLE.rangeX)
   }
 
   /** 输入层触发一次挥拍，power 为 0~1 的力度 */
@@ -387,7 +387,7 @@ export class PingPongGame {
     if (!this.options.autoMove) return this.playerTargetX
     const b = this.state.ball
     if (b.vel.z >= 0 || b.pos.z < PADDLE.homeZ - 0.35) return this.playerTargetX
-    return clamp(b.pos.x, -0.78, 0.78)
+    return clamp(b.pos.x, -PADDLE.rangeX, PADDLE.rangeX)
   }
 
   private updatePlayerPaddle(dt: number): void {
@@ -440,12 +440,15 @@ export class PingPongGame {
     const p = s.playerPaddle
     if (p.cooldown > 0) return
 
-    // 球拍平面附近才挥：太早挥会打空，太晚球已经过去了
+    // 球拍平面附近才挥：太早挥会打空，太晚球已经过去了。
+    // 挥拍有 0.17s 的有效窗口，所以提前一点挥也来得及，
+    // 只要球进到拍面厚度范围时挥拍还生效就行。
     const gap = b.pos.z - PADDLE.homeZ
-    if (gap > 0.1 || gap < -0.3) return
+    if (gap > 0.25 || gap < -0.15) return
 
+    // 球必须落在拍面范围内（横向 + 纵向），否则挥了也是打空
     const dist = Math.hypot(b.pos.x - p.x, b.pos.y - p.y)
-    if (dist > PADDLE.reach * 0.8) return
+    if (dist > PADDLE.bladeReach) return
 
     this.swing(0.8)
   }
