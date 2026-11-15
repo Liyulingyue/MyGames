@@ -614,5 +614,56 @@ console.log('\n=== 击球来源（左手/右手/双手/鼠标左键） ===')
   console.log(`  ${handOf('left') === 'left' ? 'PASS' : 'FAIL'}  手腕击球时偏好原样传给判定器`)
 }
 
+console.log('\n=== 姿态模型下载进度 ===')
+{
+  const { downloadModelBytes } = await import('../src/input/poseTracker.ts')
+
+  const makeStreamFetch = (chunks: Uint8Array[], contentLength?: number): typeof fetch => {
+    return (async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const c of chunks) controller.enqueue(c)
+          controller.close()
+        },
+      })
+      const headers = new Headers()
+      if (contentLength !== undefined) headers.set('Content-Length', String(contentLength))
+      return new Response(stream, { status: 200, headers })
+    }) as typeof fetch
+  }
+
+  const events: Array<{ ratio: number | null; loadedBytes?: number; totalBytes?: number }> = []
+  const bytes = await downloadModelBytes(
+    'https://example.com/model.task',
+    (p) => events.push({ ratio: p.ratio, loadedBytes: p.loadedBytes, totalBytes: p.totalBytes }),
+    makeStreamFetch([new Uint8Array([1, 2]), new Uint8Array([3, 4, 5])], 5),
+  )
+
+  const contentOk =
+    bytes.length === 5 && bytes[0] === 1 && bytes[1] === 2 && bytes[2] === 3 && bytes[4] === 5
+  if (!contentOk) failures++
+  console.log(`  ${contentOk ? 'PASS' : 'FAIL'}  流式分块能完整拼接出模型字节`)
+
+  const progressOk =
+    events.length >= 3 &&
+    events[0].ratio === 0 &&
+    events[1].ratio === 0.4 &&
+    events[events.length - 1].ratio === 1 &&
+    events[events.length - 1].loadedBytes === 5 &&
+    events[events.length - 1].totalBytes === 5
+  if (!progressOk) failures++
+  console.log(`  ${progressOk ? 'PASS' : 'FAIL'}  带 Content-Length 时能准确递增上报比例`)
+
+  const noLenEvents: Array<number | null> = []
+  await downloadModelBytes(
+    'https://example.com/model.task',
+    (p) => noLenEvents.push(p.ratio),
+    makeStreamFetch([new Uint8Array([9, 8])]),
+  )
+  const noLenOk = noLenEvents.length > 0 && noLenEvents.every((r) => r === null)
+  if (!noLenOk) failures++
+  console.log(`  ${noLenOk ? 'PASS' : 'FAIL'}  无 Content-Length 时 ratio 为 null`)
+}
+
 console.log(failures === 0 ? '\n全部通过' : `\n失败 ${failures} 项`)
 process.exit(failures === 0 ? 0 : 1)
