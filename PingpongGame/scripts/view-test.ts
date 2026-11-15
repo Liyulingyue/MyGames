@@ -25,7 +25,7 @@ import {
   type Framing,
 } from '../src/render/view.ts'
 import { PADDLE, TABLE } from '../src/core/constants.ts'
-import { Box3, BoxGeometry, Color, Mesh, Vector3 } from 'three'
+import { Box3, BoxGeometry, Color, LineSegments, Mesh, Vector3 } from 'three'
 import { createScene } from '../src/render/scene.ts'
 import { createOpponent } from '../src/render/opponent.ts'
 import { applyPaddleTransform, createPaddle } from '../src/render/meshes.ts'
@@ -417,9 +417,10 @@ console.log('\n=== 场馆环境切换 ===')
     const floorDetail = room?.getObjectByName('room-floor-detail')
     const nightRoom = built.scene.getObjectByName('night-room')
     const nightLamps = nightRoom?.children.filter((child) => child.name === 'night-lamp') ?? []
-    const nightWallLights = nightRoom?.children.filter((child) => child.name === 'night-wall-light') ?? []
-    const nightDoor = nightRoom?.getObjectByName('night-door')
-    const courtLines = nightRoom?.getObjectByName('night-court-lines')
+    const nightWindows = nightRoom?.children.filter((child) => child.name === 'room-window') ?? []
+    const nightWallLights = nightRoom?.children.filter((child) => child.name === 'room-wall-light') ?? []
+    const nightDoor = nightRoom?.getObjectByName('room-door')
+    const courtLines = nightRoom?.getObjectByName('room-court-lines')
     ok('明亮球室有墙边门窗、顶灯和地板细节',
       !!room?.visible && windows.length === 6 && windows.every((window) =>
         Math.abs(window.position.x) === 5 || window.position.z === 5) &&
@@ -428,16 +429,43 @@ console.log('\n=== 场馆环境切换 ===')
     const bench = room?.getObjectByName('room-bench')
     ok('明亮球室的长椅靠墙且远离球台',
       !!bench && bench.position.z > TABLE.halfLength + 1 && Math.abs(bench.position.x) > TABLE.halfWidth)
+    ok('日夜场馆的门窗、长椅、器材、时钟和灯具布局一致',
+      !!room && !!nightRoom &&
+      ['room-window', 'room-door', 'room-bench', 'room-ball-rack', 'room-clock', 'room-wall-light', 'room-court-lines']
+        .every((name) => {
+          const dayParts = room.children.filter((child) => child.name === name)
+          const nightParts = nightRoom.children.filter((child) => child.name === name)
+          return dayParts.length > 0 && dayParts.length === nightParts.length &&
+            dayParts.every((part, i) => part.position.equals(nightParts[i].position) &&
+              part.rotation.equals(nightParts[i].rotation))
+        }) &&
+      lamps.length === nightLamps.length &&
+      lamps.every((lamp, i) => lamp.position.equals(nightLamps[i].position)))
+    ok('日夜地板纹理及场地边线位置一致',
+      !!room && !!nightRoom && ['room-floor-detail', 'room-court-lines'].every((name) => {
+        const day = room.getObjectByName(name)
+        const night = nightRoom.getObjectByName(name)
+        if (!(day instanceof LineSegments) || !(night instanceof LineSegments)) return false
+        const a = day.geometry.getAttribute('position')
+        const b = night.geometry.getAttribute('position')
+        if (a.count !== b.count) return false
+        for (let i = 0; i < a.count; i++) {
+          if (a.getX(i) !== b.getX(i) || a.getY(i) !== b.getY(i) || a.getZ(i) !== b.getZ(i)) return false
+        }
+        return true
+      }))
+    const rack = room?.getObjectByName('room-ball-rack')
+    ok('器材架在场地外侧', !!rack && Math.abs(rack.position.x) > 2.8 && rack.position.z > TABLE.halfLength)
     ok('默认隐藏夜间场馆', nightRoom?.visible === false)
     ok('门窗和边框位于墙面前方且不共面',
-      !!door && !!nightDoor && [...windows, door, nightDoor].every((feature) => {
+      !!door && !!nightDoor && [...windows, ...nightWindows, door, nightDoor].every((feature) => {
         const [surface, ...frames] = feature.children
         return surface.position.z < -0.01 && frames.every((frame) =>
           frame instanceof Mesh && frame.geometry instanceof BoxGeometry &&
           frame.position.z + frame.geometry.parameters.depth / 2 < surface.position.z)
       }))
     ok('窗格接合处不相互穿透',
-      windows.every((window) => {
+      [...windows, ...nightWindows].every((window) => {
         const frames = window.children.slice(1)
         return frames.every((frame, i) => frames.slice(i + 1).every((other) => {
           const a = new Box3().setFromObject(frame)
@@ -447,13 +475,21 @@ console.log('\n=== 场馆环境切换 ===')
             Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z) <= 1e-6
         }))
       }))
+    ok('日夜壁灯均不与窗户重叠',
+      !!room && !!nightRoom && [room, nightRoom].every((venue) => {
+        if (!venue) return false
+        const venueWindows = venue.children.filter((child) => child.name === 'room-window')
+        const wallLights = venue.children.filter((child) => child.name === 'room-wall-light')
+        return wallLights.length === 2 && wallLights.every((light) =>
+          venueWindows.every((window) => !new Box3().setFromObject(light).intersectsBox(new Box3().setFromObject(window))))
+      }))
     built.setEnvironment('night')
     const night = background()
     ok('默认明亮环境与夜间环境不同', bright !== night)
     ok('切换不重建场景或改变相机位置',
       built.scene.children.length === objectCount && built.camera.position.equals(cameraPosition))
-    ok('夜间显示场馆、房门、灯具和场地边线并隐藏明亮球室',
-      room?.visible === false && nightRoom?.visible === true && nightLamps.length === 4 &&
+    ok('夜间显示相同布局的场馆并隐藏明亮球室',
+      room?.visible === false && nightRoom?.visible === true && nightWindows.length === 6 && nightLamps.length === 4 &&
       nightWallLights.length === 2 && !!nightDoor && !!courtLines)
     built.setEnvironment('bright')
     ok('切回明亮环境恢复原背景', background() === bright)
