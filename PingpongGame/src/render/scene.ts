@@ -242,6 +242,54 @@ export function createScene(): {
   addDoor(room, frameMaterial, doorMaterial, handleMaterial)
   addDoor(nightRoom, nightFrameMaterial, nightDoorMaterial, nightFrameMaterial)
 
+  const signCanvas = document.createElement('canvas')
+  signCanvas.width = 512
+  signCanvas.height = 192
+  const signContext = signCanvas.getContext('2d')!
+  signContext.fillStyle = '#226e53'
+  signContext.fillRect(0, 0, 512, 192)
+  signContext.fillStyle = '#f2f6ec'
+  signContext.textAlign = 'center'
+  signContext.textBaseline = 'middle'
+  signContext.font = 'bold 68px sans-serif'
+  signContext.fillText('安全出口', 256, 69)
+  signContext.font = 'bold 42px sans-serif'
+  signContext.fillText('EXIT', 256, 145)
+  const signTexture = new THREE.CanvasTexture(signCanvas)
+  signTexture.colorSpace = THREE.SRGBColorSpace
+  const signFace = new THREE.MeshBasicMaterial({ map: signTexture })
+  const addExitSign = (target: THREE.Group, frame: THREE.Material) => {
+    const sign = new THREE.Group()
+    sign.name = 'room-exit-sign'
+    sign.position.set(1.9, TABLE.floorY + 2.32, 5)
+    const backing = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.23, 0.035), frame)
+    backing.position.z = -0.04
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.2), signFace)
+    face.position.z = -0.06
+    face.rotation.y = Math.PI
+    sign.add(backing, face)
+    target.add(sign)
+  }
+  addExitSign(room, frameMaterial)
+  addExitSign(nightRoom, nightFrameMaterial)
+
+  const addNotices = (target: THREE.Group, frame: THREE.Material, background: string, ink: string) => {
+    const paper = new THREE.MeshStandardMaterial({ color: background, roughness: 1 })
+    const lines = new THREE.MeshStandardMaterial({ color: ink, roughness: 1 })
+    for (const side of [-1, 1]) {
+      const notice = addWallFeature(
+        'room-notice', 0.65, 0.7, paper, side * 5, 1.65, 3.7, side * Math.PI / 2, target, frame,
+      )
+      for (const y of [0.18, 0.04, -0.1]) {
+        const line = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.025, 0.02), lines)
+        line.position.set(-0.02, y, -0.045)
+        notice.add(line)
+      }
+    }
+  }
+  addNotices(room, frameMaterial, '#d6dccc', '#81928b')
+  addNotices(nightRoom, nightFrameMaterial, '#84969d', '#4b626e')
+
   const addBench = (target: THREE.Group, seatColor: string, legColor: string) => {
     const bench = new THREE.Group()
     bench.name = 'room-bench'
@@ -256,6 +304,22 @@ export function createScene(): {
       leg.position.set(x, 0.1775, 0)
       bench.add(leg)
     }
+    const bag = new THREE.Group()
+    bag.name = 'room-bag'
+    bag.position.set(-0.22, 0.425, 0)
+    const bagMaterial = new THREE.MeshStandardMaterial({ color: legColor, roughness: 0.95 })
+    const bagBody = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.18), bagMaterial)
+    bagBody.position.y = 0.07
+    bag.add(bagBody)
+    for (const x of [-0.06, 0.06]) {
+      const strap = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.05, 0.018), bagMaterial)
+      strap.position.set(x, 0.165, 0)
+      bag.add(strap)
+    }
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.102, 0.018, 0.018), bagMaterial)
+    grip.position.y = 0.199
+    bag.add(grip)
+    bench.add(bag)
     target.add(bench)
   }
   addBench(room, '#936e55', '#596763')
@@ -269,6 +333,18 @@ export function createScene(): {
     const tray = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.06, 0.4), rackMaterial)
     tray.position.y = 0.55
     rack.add(tray)
+    for (const z of [-0.19, 0.19]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.045, 0.02), rackMaterial)
+      rail.name = 'rack-rail'
+      rail.position.set(0, 0.6025, z)
+      rack.add(rail)
+    }
+    for (const x of [-0.315, 0.315]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.045, 0.36), rackMaterial)
+      rail.name = 'rack-rail'
+      rail.position.set(x, 0.6025, 0)
+      rack.add(rail)
+    }
     for (const x of [-0.25, 0.25]) {
       const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.52, 0.32), rackMaterial)
       leg.position.set(x, 0.26, 0)
@@ -282,6 +358,17 @@ export function createScene(): {
       rack.add(ball)
     }
     target.add(rack)
+
+    const bin = new THREE.Group()
+    bin.name = 'room-bin'
+    bin.position.set(-4.15, TABLE.floorY, 4.55)
+    const binMaterial = new THREE.MeshStandardMaterial({ color: rackColor, roughness: 0.8 })
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.105, 0.35, 20), binMaterial)
+    body.position.y = 0.175
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.025, 20), binMaterial)
+    lid.position.y = 0.3625
+    bin.add(body, lid)
+    target.add(bin)
 
     const clock = new THREE.Group()
     clock.name = 'room-clock'

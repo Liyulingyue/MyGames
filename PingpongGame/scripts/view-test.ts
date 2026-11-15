@@ -395,7 +395,7 @@ console.log('\n=== 场馆环境切换 ===')
 {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'document')
   const context = {
-    fillRect() {}, clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+    fillRect() {}, fillText() {}, clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
     createLinearGradient() { return { addColorStop() {} } },
   }
   Object.defineProperty(globalThis, 'document', {
@@ -431,7 +431,8 @@ console.log('\n=== 场馆环境切换 ===')
       !!bench && bench.position.z > TABLE.halfLength + 1 && Math.abs(bench.position.x) > TABLE.halfWidth)
     ok('日夜场馆的门窗、长椅、器材、时钟和灯具布局一致',
       !!room && !!nightRoom &&
-      ['room-window', 'room-door', 'room-bench', 'room-ball-rack', 'room-clock', 'room-wall-light', 'room-court-lines']
+      ['room-window', 'room-door', 'room-exit-sign', 'room-notice', 'room-bench', 'room-bin',
+        'room-ball-rack', 'room-clock', 'room-wall-light', 'room-court-lines']
         .every((name) => {
           const dayParts = room.children.filter((child) => child.name === name)
           const nightParts = nightRoom.children.filter((child) => child.name === name)
@@ -456,6 +457,40 @@ console.log('\n=== 场馆环境切换 ===')
       }))
     const rack = room?.getObjectByName('room-ball-rack')
     ok('器材架在场地外侧', !!rack && Math.abs(rack.position.x) > 2.8 && rack.position.z > TABLE.halfLength)
+    ok('日夜出口标识在门上方且不与门重叠',
+      !!room && !!nightRoom && [room, nightRoom].every((venue) => {
+        const sign = venue?.getObjectByName('room-exit-sign')
+        const venueDoor = venue?.getObjectByName('room-door')
+        return !!sign && !!venueDoor &&
+          new Box3().setFromObject(sign).min.y > new Box3().setFromObject(venueDoor).max.y
+      }))
+    const dayBag = room?.getObjectByName('room-bag')
+    const nightBag = nightRoom?.getObjectByName('room-bag')
+    ok('日夜长椅上的球包位置一致且放在椅面上',
+      !!room && !!nightRoom && !!dayBag && !!nightBag && dayBag.position.equals(nightBag.position) &&
+      [room, nightRoom].every((venue) => {
+        const venueBench = venue?.getObjectByName('room-bench')
+        const bag = venueBench?.getObjectByName('room-bag')
+        const seat = venueBench?.children[0]
+        return !!seat && !!bag &&
+          new Box3().setFromObject(bag).min.y >= new Box3().setFromObject(seat).max.y - 1e-6
+      }))
+    ok('器材架护栏在台面上且角部不重叠',
+      !!room && !!nightRoom && [room, nightRoom].every((venue) => {
+        const venueRack = venue?.getObjectByName('room-ball-rack')
+        const tray = venueRack?.children[0]
+        const rails = venueRack?.children.filter((child) => child.name === 'rack-rail') ?? []
+        if (!tray || rails.length !== 4) return false
+        const top = new Box3().setFromObject(tray).max.y
+        return rails.every((rail, i) => {
+          const a = new Box3().setFromObject(rail)
+          return a.min.y >= top - 1e-6 && rails.slice(i + 1).every((other) => {
+            const b = new Box3().setFromObject(other)
+            return Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x) <= 1e-6 ||
+              Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z) <= 1e-6
+          })
+        })
+      }))
     ok('默认隐藏夜间场馆', nightRoom?.visible === false)
     ok('门窗和边框位于墙面前方且不共面',
       !!door && !!nightDoor && [...windows, ...nightWindows, door, nightDoor].every((feature) => {
@@ -482,6 +517,13 @@ console.log('\n=== 场馆环境切换 ===')
         const wallLights = venue.children.filter((child) => child.name === 'room-wall-light')
         return wallLights.length === 2 && wallLights.every((light) =>
           venueWindows.every((window) => !new Box3().setFromObject(light).intersectsBox(new Box3().setFromObject(window))))
+      }))
+    ok('日夜公告栏均不与窗户重叠',
+      !!room && !!nightRoom && [room, nightRoom].every((venue) => {
+        const venueWindows = venue?.children.filter((child) => child.name === 'room-window') ?? []
+        const notices = venue?.children.filter((child) => child.name === 'room-notice') ?? []
+        return notices.length === 2 && venueWindows.length === 6 && notices.every((notice) =>
+          venueWindows.every((window) => !new Box3().setFromObject(notice).intersectsBox(new Box3().setFromObject(window))))
       }))
     built.setEnvironment('night')
     const night = background()
