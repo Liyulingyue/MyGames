@@ -3,6 +3,7 @@
  *
  * - ← / → 或 A / D：左右移动球拍
  * - 空格：挥拍（力度固定）
+ * - F：爆气（怒气满时武装一次扣杀，见 core/game.ts 的 armSmash）
  *
  * 球拍高度由游戏自动跟随球，不需要上下控制（见 PingPongGame.autoPaddleHeight）。
  *
@@ -58,6 +59,15 @@ export class KeyboardController {
   consumeSwing(): boolean {
     if (this.keys.has(' ')) {
       this.keys.delete(' ')
+      return true
+    }
+    return false
+  }
+
+  /** 本帧是否请求爆气（F 键，只消费一次） */
+  consumeSmash(): boolean {
+    if (this.keys.has('f')) {
+      this.keys.delete('f')
       return true
     }
     return false

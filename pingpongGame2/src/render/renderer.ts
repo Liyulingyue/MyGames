@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import type { GameState } from '../core/game.ts'
-import { PADDLE, TABLE } from '../core/constants.ts'
+import { TABLE } from '../core/constants.ts'
+import type { GameEvent } from '../core/types.ts'
 import { createScene } from './scene.ts'
-import { applyPaddleTransform, createBall, createPaddle } from './meshes.ts'
+import { applyPaddleTransform, createBall, createPaddle, OpponentRig } from './meshes.ts'
 import {
   DEFAULT_CAMERA,
   fitFraming,
@@ -16,6 +17,16 @@ import {
 const TRAIL_LENGTH = 18
 /** 拖尾光点之间的弧长间隔（米）：比球略大，保证连成一条光带而不是一串珠子 */
 const TRAIL_STEP = 0.03
+/** 击球火花的数量上限（对象池） */
+const SPARK_COUNT = 28
+
+/** 一个火花粒子：精灵 + 速度 + 生命周期 */
+interface Spark {
+  sprite: THREE.Sprite
+  vel: THREE.Vector3
+  life: number
+  maxLife: number
+}
 
 /**
  * 径向渐变贴图：拖尾光点用它。
@@ -63,12 +74,21 @@ export class GameRenderer {
   private ball: THREE.Mesh
   private playerPaddle: THREE.Group
   private opponentPaddle: THREE.Group
-  private opponent: THREE.Group
+  /** 对手人形（含情绪动画与持拍手臂 IK） */
+  private rig: OpponentRig
   private resizeObserver: ResizeObserver
 
   /** 球的拖尾：历史位置上的渐隐光点 */
   private trail: THREE.Sprite[] = []
   private trailHistory: THREE.Vector3[] = []
+
+  /** 击球火花（对象池，循环复用） */
+  private sparks: Spark[] = []
+  private sparkCursor = 0
+  /** 上一帧时间戳，用于驱动模型 / 粒子动画 */
+  private lastFrameTime = performance.now()
+  /** 镜头震动强度（扣杀命中时触发，随时间衰减） */
+  private shake = 0
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -76,7 +96,6 @@ export class GameRenderer {
     const built = createScene()
     this.scene = built.scene
     this.camera = built.camera
-    this.opponent = built.opponent
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -90,6 +109,10 @@ export class GameRenderer {
 
     this.ball = createBall()
     this.scene.add(this.ball)
+
+    // —— 对手人形 ——
+    this.rig = new OpponentRig()
+    this.scene.add(this.rig.group)
 
     // —— 拖尾 ——
     // 用一串精灵而不是一条线：精灵永远正对相机，速度快时也不会变成
@@ -108,6 +131,22 @@ export class GameRenderer {
       sprite.scale.setScalar(0.05)
       this.trail.push(sprite)
       this.trailHistory.push(new THREE.Vector3())
+      this.scene.add(sprite)
+    }
+
+    // —— 击球火花（对象池，预先全部建好） ——
+    const sparkTexture = createRadialTexture('rgba(255,255,255,0.95)', 'rgba(120,190,255,0.4)', 0.4)
+    for (let i = 0; i < SPARK_COUNT; i++) {
+      const sprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: sparkTexture,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          opacity: 0,
+        }),
+      )
+      this.sparks.push({ sprite, vel: new THREE.Vector3(), life: 0, maxLife: 1 })
       this.scene.add(sprite)
     }
 
@@ -186,6 +225,10 @@ export class GameRenderer {
 
   /** 把游戏状态同步到场景 */
   sync(state: GameState): void {
+    const now = performance.now()
+    const dt = Math.min((now - this.lastFrameTime) / 1000, 0.05)
+    this.lastFrameTime = now
+
     this.ball.position.set(state.ball.pos.x, state.ball.pos.y, state.ball.pos.z)
     this.ball.rotation.x += state.ball.vel.z * 0.08
     this.ball.rotation.z -= state.ball.vel.x * 0.08
@@ -195,15 +238,73 @@ export class GameRenderer {
     applyPaddleTransform(this.playerPaddle, state.playerPaddle)
     applyPaddleTransform(this.opponentPaddle, state.opponentPaddle)
 
-    // 对手人形跟随球拍（手臂大致对准拍面）
-    this.opponent.position.x = state.opponentPaddle.x * 0.75
-    this.opponent.position.z = PADDLE.opponentZ + 0.55
+    this.rig.update(state.opponentPaddle, state.ball.pos, dt)
+    this.updateSparks(dt)
+
+    // 爆气武装期间，球的拖尾染成橙红色（紧张感提示）
+    const trailTint = state.smashArmed > 0 ? '#ff9d7a' : '#ffffff'
+    for (const sprite of this.trail) sprite.material.color.set(trailTint)
+
+    // 震动衰减
+    this.shake = Math.max(0, this.shake - dt * 1.4)
 
     // 相机跟随我方横向位置（轻微，增加临场感）
     // 跟随量是相对用户设定位的偏移，用户把相机推到左边不会把跟随吃掉。
     const targetX = state.playerPaddle.x * 0.22
     this.panX += (targetX - this.panX) * 0.08
     this.applyCameraPose()
+  }
+
+  /**
+   * 把主循环里的游戏事件转成表现层反馈：
+   * 击球 → 火花；得分 / 结束 → 对手情绪动画；扣杀 → 大火花 + 镜头震动。
+   *
+   * 挥拍动作不需要事件——对手拍面的 swingAnim 本身就带着动画进度。
+   */
+  notifyEvent(ev: GameEvent): void {
+    if (ev.type === 'paddleHit' && ev.pos) {
+      this.spawnSparks(ev.pos, ev.side === 'player' ? 10 : 6)
+    } else if (ev.type === 'point' && ev.winner) {
+      // 对手得分 → 得意；玩家得分 → 沮丧
+      this.rig.setMood(ev.winner === 'opponent' ? 'happy' : 'sad', 1.4)
+    } else if (ev.type === 'gameOver' && ev.winner) {
+      this.rig.setMood(ev.winner === 'opponent' ? 'happy' : 'sad', 5)
+    } else if (ev.type === 'smash' && ev.pos) {
+      // 扣杀：更大的火花团 + 镜头震动（render 时应用偏移并复位）
+      this.spawnSparks(ev.pos, 18)
+      this.shake = 0.35
+    }
+  }
+
+  /** 在击球点喷一团火花 */
+  private spawnSparks(pos: { x: number; y: number; z: number }, count: number): void {
+    for (let i = 0; i < count; i++) {
+      const spark = this.sparks[this.sparkCursor]
+      this.sparkCursor = (this.sparkCursor + 1) % this.sparks.length
+      spark.sprite.position.set(pos.x, pos.y, pos.z)
+      spark.vel.set(
+        (Math.random() - 0.5) * 2.4,
+        Math.random() * 1.6 + 0.3,
+        (Math.random() - 0.5) * 2.4,
+      )
+      spark.maxLife = 0.25 + Math.random() * 0.2
+      spark.life = spark.maxLife
+    }
+  }
+
+  private updateSparks(dt: number): void {
+    for (const spark of this.sparks) {
+      if (spark.life <= 0) {
+        spark.sprite.material.opacity = 0
+        continue
+      }
+      spark.life -= dt
+      spark.vel.y -= 4.5 * dt
+      spark.sprite.position.addScaledVector(spark.vel, dt)
+      const k = Math.max(spark.life / spark.maxLife, 0)
+      spark.sprite.material.opacity = 0.85 * k
+      spark.sprite.scale.setScalar(0.012 + 0.03 * k)
+    }
   }
 
   /**
@@ -255,7 +356,18 @@ export class GameRenderer {
   }
 
   render(): void {
-    this.renderer.render(this.scene, this.camera)
+    if (this.shake > 0) {
+      // 震动只在渲染瞬间加偏移，渲染完立即复位，不污染相机基准位置
+      const ox = (Math.random() - 0.5) * this.shake * 0.09
+      const oy = (Math.random() - 0.5) * this.shake * 0.07
+      this.camera.position.x += ox
+      this.camera.position.y += oy
+      this.renderer.render(this.scene, this.camera)
+      this.camera.position.x -= ox
+      this.camera.position.y -= oy
+    } else {
+      this.renderer.render(this.scene, this.camera)
+    }
   }
 
   dispose(): void {

@@ -31,6 +31,10 @@ export type SfxName =
   | 'lose'
   /** UI 点击 */
   | 'ui'
+  /** 爆气武装（怒气清空，等待扣杀） */
+  | 'smashArm'
+  /** 扣杀命中 */
+  | 'smash'
 
 interface ToneOptions {
   /** 波形 */
@@ -167,6 +171,17 @@ export class SoundEngine {
         break
       case 'ui':
         this.tone({ freq: 1250, dur: 0.022, type: 'square', gain: 0.07 })
+        break
+      case 'smashArm':
+        // 爆气：一条向上的充能滑音，两层叠出"蓄力"感
+        this.tone({ freq: 320, freqTo: 980, dur: 0.28, type: 'sawtooth', gain: 0.14 })
+        this.tone({ freq: 640, freqTo: 1960, dur: 0.3, type: 'triangle', gain: 0.1, delay: 0.04 })
+        break
+      case 'smash':
+        // 扣杀：比普通击球重得多——高频"炸"声 + 低频冲击
+        this.noise({ dur: 0.14, freq: 2600, q: 0.7, gain: 0.6 })
+        this.tone({ freq: 190, freqTo: 70, dur: 0.16, type: 'square', gain: 0.32 })
+        this.tone({ freq: 540, freqTo: 160, dur: 0.09, type: 'sine', gain: 0.28 })
         break
     }
   }

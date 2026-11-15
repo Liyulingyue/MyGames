@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { PADDLE, TABLE } from '../core/constants.ts'
+import { TABLE } from '../core/constants.ts'
 import { DEFAULT_CAMERA, VIEW, resolveCamera } from './view.ts'
 
 /** 球台台面的贴图：按国际乒联标准画白线 */
@@ -81,13 +81,12 @@ export function createNetTexture(): THREE.CanvasTexture {
   return texture
 }
 
-/** 搭建整个场景：地板、球台、球网、灯光、相机 */
+/** 搭建整个场景：地板、球台、球网、灯光、相机（对手人形见 meshes.ts 的 OpponentRig） */
 export function createScene(): {
   scene: THREE.Scene
   camera: THREE.PerspectiveCamera
   tableTop: THREE.Mesh
   net: THREE.Mesh
-  opponent: THREE.Group
 } {
   const scene = new THREE.Scene()
   scene.background = new THREE.Color('#0b1020')
@@ -230,34 +229,5 @@ export function createScene(): {
     scene.add(post)
   }
 
-  // —— 对手（简化人形，站在对方台端后方） ——
-  const opponent = new THREE.Group()
-  const bodyMaterial = new THREE.MeshStandardMaterial({ color: '#2c3e63', roughness: 0.75 })
-  const headMaterial = new THREE.MeshStandardMaterial({ color: '#d9b48f', roughness: 0.85 })
-
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.42, 6, 14), bodyMaterial)
-  torso.position.y = 0.52
-  torso.castShadow = true
-  opponent.add(torso)
-
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 20, 16), headMaterial)
-  head.position.y = 0.9
-  head.castShadow = true
-  opponent.add(head)
-
-  // 双臂
-  const armMaterial = new THREE.MeshStandardMaterial({ color: '#35507d', roughness: 0.75 })
-  const armL = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.3, 4, 10), armMaterial)
-  armL.position.set(-0.21, 0.6, 0)
-  armL.rotation.z = 0.25
-  opponent.add(armL)
-  const armR = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.3, 4, 10), armMaterial)
-  armR.position.set(0.21, 0.6, 0)
-  armR.rotation.z = -0.25
-  opponent.add(armR)
-
-  opponent.position.set(0, TABLE.surfaceY, PADDLE.opponentZ + 0.55)
-  scene.add(opponent)
-
-  return { scene, camera, tableTop, net, opponent }
+  return { scene, camera, tableTop, net }
 }

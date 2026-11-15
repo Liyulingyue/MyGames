@@ -614,5 +614,82 @@ console.log('\n=== 击球来源（左手/右手/双手/鼠标左键） ===')
   console.log(`  ${handOf('left') === 'left' ? 'PASS' : 'FAIL'}  手腕击球时偏好原样传给判定器`)
 }
 
+console.log('\n=== 爆气手势（双手举过头顶） ===')
+{
+  const { handsRaised, LANDMARK } = await import('../src/input/poseTracker.ts')
+
+  const lm = (x: number, y: number, visibility = 1): NormalizedLandmark => ({
+    x,
+    y,
+    z: 0,
+    visibility,
+  })
+  const build = (over: Partial<Record<number, NormalizedLandmark>>): NormalizedLandmark[] => {
+    const arr: NormalizedLandmark[] = new Array(33).fill(null).map(() => lm(0, 0, 0))
+    for (const [i, v] of Object.entries(over)) {
+      if (v) arr[Number(i)] = v
+    }
+    return arr
+  }
+
+  // 正常站立：双手在肩下 → 不算举手
+  const standing = build({
+    [LANDMARK.LEFT_SHOULDER]: lm(0.45, 0.35),
+    [LANDMARK.RIGHT_SHOULDER]: lm(0.55, 0.35),
+    [LANDMARK.LEFT_WRIST]: lm(0.38, 0.62),
+    [LANDMARK.RIGHT_WRIST]: lm(0.62, 0.62),
+  })
+  if (handsRaised(standing)) failures++
+  console.log(`  ${handsRaised(standing) === false ? 'PASS' : 'FAIL'}  正常站姿（手在肩下）不算举手`)
+
+  // 鼻子默认不可见（没注入就是 visibility 0）：单手举高也不算
+  const oneHand = build({
+    [LANDMARK.LEFT_SHOULDER]: lm(0.45, 0.35),
+    [LANDMARK.RIGHT_SHOULDER]: lm(0.55, 0.35),
+    [LANDMARK.LEFT_WRIST]: lm(0.38, 0.1),
+    [LANDMARK.RIGHT_WRIST]: lm(0.62, 0.62),
+  })
+  if (handsRaised(oneHand)) failures++
+  console.log(`  ${handsRaised(oneHand) === false ? 'PASS' : 'FAIL'}  只有一只手举高不算`)
+
+  // 双手高于肩线（鼻子不可见时的判定线）：y 比肩线 - 0.08 还小才算
+  const bothHands = build({
+    [LANDMARK.LEFT_SHOULDER]: lm(0.45, 0.35),
+    [LANDMARK.RIGHT_SHOULDER]: lm(0.55, 0.35),
+    [LANDMARK.LEFT_WRIST]: lm(0.38, 0.15),
+    [LANDMARK.RIGHT_WRIST]: lm(0.62, 0.15),
+  })
+  if (!handsRaised(bothHands)) failures++
+  console.log(`  ${handsRaised(bothHands) ? 'PASS' : 'FAIL'}  双手明显举过肩线算举手（鼻子缺失时）`)
+
+  // 双手只是抬到肩附近（不到肩线 - 0.08）→ 不算，避免挥拍随挥误触
+  const barely = build({
+    [LANDMARK.LEFT_SHOULDER]: lm(0.45, 0.35),
+    [LANDMARK.RIGHT_SHOULDER]: lm(0.55, 0.35),
+    [LANDMARK.LEFT_WRIST]: lm(0.38, 0.3),
+    [LANDMARK.RIGHT_WRIST]: lm(0.62, 0.3),
+  })
+  if (handsRaised(barely)) failures++
+  console.log(`  ${handsRaised(barely) === false ? 'PASS' : 'FAIL'}  双手只到肩附近不算（留余量防误触）`)
+
+  // 鼻子可见时用鼻尖做判定线（更严格）
+  const withNose = {
+    ...build({
+      [LANDMARK.LEFT_SHOULDER]: lm(0.45, 0.35),
+      [LANDMARK.RIGHT_SHOULDER]: lm(0.55, 0.35),
+      [LANDMARK.LEFT_WRIST]: lm(0.38, 0.2),
+      [LANDMARK.RIGHT_WRIST]: lm(0.62, 0.2),
+    }),
+    [0]: lm(0.5, 0.25),
+  }
+  // 手腕 y=0.2 < 鼻子 y=0.25 - 0.02 → 过头顶
+  if (!handsRaised(withNose)) failures++
+  console.log(`  ${handsRaised(withNose) ? 'PASS' : 'FAIL'}  鼻子可见时以鼻尖为判定线`)
+
+  // 手腕没检测到 → 永远不算
+  if (handsRaised(build({}))) failures++
+  console.log(`  ${handsRaised(build({})) === false ? 'PASS' : 'FAIL'}  没有关键点时不误触`)
+}
+
 console.log(failures === 0 ? '\n全部通过' : `\n失败 ${failures} 项`)
 process.exit(failures === 0 ? 0 : 1)

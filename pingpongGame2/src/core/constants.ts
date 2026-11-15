@@ -109,6 +109,31 @@ export const TARGET_SCORE = 11
 /** 每 2 个球交换发球方 */
 export const SERVE_ROTATION = 2
 
+/**
+ * 爆气（怒气）玩法参数。
+ *
+ * 怒气通过积极对打积累：每次成功回球、赢分都加，输分也给一点（追分机制）。
+ * 攒满后可以爆气武装一次扣杀——又快又平、专打空档，对手很难接。
+ */
+export const RAGE = {
+  /** 怒气上限 */
+  max: 100,
+  /** 每次成功击球获得的怒气 */
+  hitGain: 14,
+  /** 赢一分获得的怒气 */
+  winPointGain: 18,
+  /** 输一分也获得少量怒气（越打越接近翻盘机会） */
+  losePointGain: 6,
+  /** 爆气武装持续时间（秒）：期间下一次命中球的挥拍变成扣杀 */
+  armDuration: 5,
+  /** 扣杀初速（m/s），远高于普通回球上限（6.2） */
+  smashSpeed: 9.2,
+  /** 面对扣杀时 AI 失误率的放大倍数 */
+  aiPanicScale: 2.5,
+  /** 面对扣杀时 AI 反应延迟的放大倍数 */
+  aiReactionPanic: 1.6,
+} as const
+
 export interface AIConfig {
   /** 接到球后的反应延迟（秒） */
   reactionDelay: number

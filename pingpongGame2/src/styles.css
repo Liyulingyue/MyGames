@@ -107,11 +107,111 @@ body {
   font-size: 20px;
 }
 
+/* 赛点标记：任一方只差 1 分获胜时出现 */
+.matchpoint-pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 180, 84, 0.16);
+  border: 1px solid rgba(255, 180, 84, 0.45);
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  animation: pulse 0.6s ease-out infinite alternate;
+}
+
+/* 对拉计数：回合打到 3 拍以上时出现在计分板下方 */
+.rally-badge {
+  position: absolute;
+  top: 126px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 16px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  backdrop-filter: blur(10px);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- 爆气怒气条 ---------------- */
+
+/* 三态：平时青色充能 / 满了橙色发光 / 武装后红色脉冲 */
+.rage-bar {
+  position: absolute;
+  top: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  height: 22px;
+  padding: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.rage-fill {
+  position: absolute;
+  inset: 0;
+  width: 0%;
+  background: linear-gradient(90deg, #2fb8e0, #4dd4ff);
+  transition: width 0.25s ease;
+}
+
+/* 体感爆气手势的充能进度（双手举高时从左往右刷白） */
+.rage-charge {
+  position: absolute;
+  inset: 0;
+  width: 0%;
+  background: rgba(255, 255, 255, 0.4);
+  transition: width 0.1s linear;
+}
+
+.rage-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
+}
+
+.rage-bar.full {
+  border-color: var(--warn);
+  box-shadow: 0 0 16px rgba(255, 180, 84, 0.45);
+}
+
+.rage-bar.full .rage-fill {
+  background: linear-gradient(90deg, #ff9d3c, #ffd24d);
+}
+
+.rage-bar.armed {
+  border-color: var(--bad);
+  box-shadow: 0 0 18px rgba(255, 107, 107, 0.55);
+  animation: pulse 0.4s ease-out infinite alternate;
+}
+
+.rage-bar.armed .rage-fill {
+  background: linear-gradient(90deg, #ff5c5c, #ff9d7a);
+}
+
 .status-panel {
   position: absolute;
   top: 18px;
   left: 18px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -119,6 +219,54 @@ body {
   font-size: 12px;
   line-height: 1.7;
   min-width: 190px;
+}
+
+/* 收起时只剩一条细横条，不再挡住跑到画面左侧的对手 */
+.status-panel.collapsed {
+  min-width: 0;
+  padding: 8px 12px;
+}
+
+/* 标题栏：模式指示 + 帧率 + 展开箭头，点击整栏切换收起/展开 */
+.status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.status-mode {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.status-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.status-panel .chevron {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.status-body {
+  margin-top: 6px;
 }
 
 .status-row {
@@ -376,6 +524,32 @@ body {
   color: var(--muted);
 }
 
+/* 结算统计：最长对拉 / 击球数 */
+.gameover-stats {
+  display: flex;
+  gap: 30px;
+  margin-top: 2px;
+}
+
+.gameover-stats .stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.gameover-stats .stat span {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
+.gameover-stats .stat b {
+  font-size: 22px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
 .gameover .start-btn {
   margin-top: 6px;
   min-width: 180px;
@@ -567,13 +741,27 @@ body {
   accent-color: var(--accent);
 }
 
-/* 主菜单里的体感选项（走位用身体，击球用手/鼠标） */
+/* 主菜单里的体感/对局选项（走位用身体，击球用手/鼠标；难度等参数） */
 .menu-options {
   width: 420px;
   max-width: 92%;
-  margin: 16px 0 6px;
+  margin: 4px 0 6px;
   text-align: left;
   font-size: 13px;
+}
+
+.menu-options-title {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+/* 参数多了以后开始界面可能超出屏幕高度，允许滚动 */
+.start-overlay {
+  overflow-y: auto;
+  padding: 36px 16px;
 }
 
 .switch {
@@ -597,7 +785,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   gap: 18px;
   background: radial-gradient(circle at 50% 40%, rgba(20, 32, 62, 0.9), rgba(5, 8, 18, 0.96));
   backdrop-filter: blur(3px);

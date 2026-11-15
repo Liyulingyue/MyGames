@@ -300,5 +300,56 @@ console.log('\n=== 结算后不再继续 ===')
   )
 }
 
+// ---------------------------------------------------------------- 10. 爆气与扣杀
+console.log('\n=== 爆气与扣杀 ===')
+{
+  const game = new PingPongGame({ seed: 13, ai: 'normal' })
+  game.start()
+
+  // 怒气不满时不能爆气
+  assert('怒气不满时爆气失败', !game.armSmash())
+
+  // 和"挥拍与失分"一样的完美挥拍策略，攒怒气直到爆气 → 扣杀
+  let smashSeen = false
+  let smashSpeed = 0
+  let armed = false
+  let rageWasFull = false
+  let guard = 0
+  while (!smashSeen && guard++ < 60 * 300) {
+    const s = game.state
+    if (s.ball.vel.z < 0 && s.ball.pos.z < 0) {
+      game.setPlayerTarget(Math.max(-0.66, Math.min(0.66, s.ball.pos.x)))
+      const gap = s.ball.pos.z - PADDLE.homeZ
+      if (gap < 0.16 && gap > -0.1) game.swing(0.85)
+    }
+    if (!armed && s.rage >= 100) {
+      rageWasFull = true
+      armed = game.armSmash()
+    }
+    const events = game.step(1 / 60)
+    for (const e of events) {
+      if (e.type === 'smash') {
+        smashSeen = true
+        const v = game.state.ball.vel
+        smashSpeed = Math.hypot(v.x, v.y, v.z)
+      }
+    }
+  }
+  assert('积极对打能攒满怒气', rageWasFull, `最终怒气 ${game.state.rage}`)
+  assert('怒气满后能爆气武装', armed)
+  assert('爆气后的命中触发扣杀', smashSeen)
+  assert(
+    '扣杀球速远超普通回球上限',
+    smashSpeed > 7.5,
+    `扣杀球速 ${smashSpeed.toFixed(2)} m/s（普通上限 6.2）`,
+  )
+  assert('扣杀后怒气清零', game.state.rage < 100, `怒气 ${game.state.rage}`)
+
+  // 武装未消耗时重复爆气应失败（单次武装）
+  game.state.rage = 100
+  game.state.smashArmed = 1
+  assert('武装期间不能重复爆气', !game.armSmash())
+}
+
 console.log(failures === 0 ? '\n全部通过' : `\n失败 ${failures} 项`)
 process.exit(failures === 0 ? 0 : 1)

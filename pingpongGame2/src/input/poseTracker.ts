@@ -326,6 +326,39 @@ export class PoseTracker {
   }
 }
 
+/** 鼻尖关键点索引（"双手举过头顶"手势的判定基准） */
+const NOSE = 0
+
+/**
+ * 爆气手势：双手是否举过头顶。
+ *
+ * 体感模式下人站在摄像头前，跑去按 F 不现实——爆气改用
+ * "双手高举"这个充电式手势触发（在 App 里还要保持一小段时间才生效）。
+ *
+ * 判定线优先用**鼻子**（头基本总能检测到）；鼻子不可见时退到
+ * 双肩连线并收紧余量。双手都明显高于这条线才算"举过头顶"：
+ * 正常挥拍只有一只手在胸口附近快速摆动，不会两只手同时举过头顶，
+ * 所以不会和击球动作误触。
+ */
+export function handsRaised(landmarks: NormalizedLandmark[] | null | undefined): boolean {
+  if (!landmarks || landmarks.length === 0) return false
+  const lw = landmarks[LANDMARK.LEFT_WRIST]
+  const rw = landmarks[LANDMARK.RIGHT_WRIST]
+  if (!isVisible(lw) || !isVisible(rw)) return false
+
+  let line: number
+  const nose = landmarks[NOSE]
+  if (isVisible(nose)) {
+    line = nose.y
+  } else {
+    const ls = landmarks[LANDMARK.LEFT_SHOULDER]
+    const rs = landmarks[LANDMARK.RIGHT_SHOULDER]
+    if (!isVisible(ls) || !isVisible(rs)) return false
+    line = (ls.y + rs.y) / 2 - 0.08
+  }
+  return lw.y < line - 0.02 && rw.y < line - 0.02
+}
+
 /**
  * 从原始关键点算出一帧姿态数据。
  *
