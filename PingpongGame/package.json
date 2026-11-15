@@ -12,7 +12,8 @@
     "analyze": "node --experimental-strip-types scripts/analyze_contact.ts",
     "test:physics": "node --experimental-strip-types scripts/physics-test.ts",
     "test:input": "node --experimental-strip-types scripts/input-test.ts",
-    "test:game": "node --experimental-strip-types scripts/game-test.ts"
+    "test:game": "node --experimental-strip-types scripts/game-test.ts",
+    "test:view": "node --experimental-strip-types scripts/view-test.ts"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.2.3",

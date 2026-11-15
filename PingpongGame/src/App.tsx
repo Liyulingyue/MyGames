@@ -3,6 +3,7 @@ import { PingPongGame } from './core/game.ts'
 import { AI_PRESETS, PLAYER, TARGET_SCORE } from './core/constants.ts'
 import type { Phase, Side } from './core/types.ts'
 import { GameRenderer } from './render/renderer.ts'
+import { VIEW } from './render/view.ts'
 import { PoseTracker, isVisible } from './input/poseTracker.ts'
 import type { MotionSource, PoseFrame } from './input/poseTracker.ts'
 import { SwingDetector, paddleTargetFromPose, pickArmSample, handOf, isMouseSwing } from './input/swingDetector.ts'
@@ -130,6 +131,8 @@ export default function App() {
   const [soundOn, setSoundOn] = useState(true)
   /** 音量 0~1 */
   const [soundVolume, setSoundVolume] = useState(0.65)
+  /** 画面倍率：1 = 原样，3 = 画面放大约三倍，0.5 = 画面缩一半（裁剪缩放，透视不变） */
+  const [displaySize, setDisplaySize] = useState(1)
   /** 用户是否手动调过球速：没调过的话，切到体感模式会自动用更慢的球 */
   const speedTouchedRef = useRef(false)
   const [hud, setHud] = useState<HudState>(INITIAL_HUD)
@@ -710,6 +713,11 @@ export default function App() {
     game.options.autoSwing = autoSwing
   }, [timeScale, autoMove, autoSwing])
 
+  // 显示尺寸实时生效（只动相机，物理完全不受影响）
+  useEffect(() => {
+    rendererRef.current?.setDisplaySize(displaySize)
+  }, [displaySize])
+
   // 退出时释放摄像头
   useEffect(() => {
     return () => {
@@ -1039,6 +1047,26 @@ export default function App() {
                 <div className="setting-hint">
                   相当于慢动作：弹道不变，只是整个比赛变慢，给你更多反应时间。
                   0.5 就是两倍慢动作，1.2 是两成快节奏。体感模式建议 0.8 左右。
+                </div>
+              </div>
+
+              <div className="setting">
+                <div className="setting-label">
+                  <span>球台显示尺寸</span>
+                  <b>{displaySize.toFixed(2)}x</b>
+                </div>
+                <input
+                  type="range"
+                  min={VIEW.minDisplaySize}
+                  max={VIEW.maxDisplaySize}
+                  step={0.05}
+                  value={displaySize}
+                  onChange={(e) => setDisplaySize(Number(e.target.value))}
+                />
+                <div className="setting-hint">
+                  相机不动、透视不变，只是把画面裁一块出来重新铺满屏幕。
+                  1.0 是原样：往上调画面放大（球台、球、球拍一起变大，裁掉的是上方空背景），
+                  往下调画面缩小、露出更多场景。放到 3.0 就只剩我方这半张台面了。
                 </div>
               </div>
 

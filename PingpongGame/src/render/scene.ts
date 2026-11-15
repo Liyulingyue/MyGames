@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { PADDLE, TABLE } from '../core/constants.ts'
+import { VIEW } from './view.ts'
 
 /** 球台台面的贴图：按国际乒联标准画白线 */
 export function createTableTexture(): THREE.CanvasTexture {
@@ -93,9 +94,10 @@ export function createScene(): {
   scene.fog = new THREE.Fog('#0b1020', 8, 22)
 
   // —— 相机：第一人称，站在我方台端 ——
-  const camera = new THREE.PerspectiveCamera(58, 1, 0.05, 60)
-  camera.position.set(0, 1.4, -2.35)
-  camera.lookAt(0, 0.12, 0.8)
+  // 相机参数由 render/view.ts 按宽高比和显示尺寸算好（这里先用基准取景）
+  const camera = new THREE.PerspectiveCamera(VIEW.base.fov, 1, 0.05, 60)
+  camera.position.set(VIEW.base.pos.x, VIEW.base.pos.y, VIEW.base.pos.z)
+  camera.lookAt(VIEW.base.target.x, VIEW.base.target.y, VIEW.base.target.z)
 
   // —— 灯光 ——
   scene.add(new THREE.HemisphereLight('#bcd4ff', '#2a2118', 0.85))

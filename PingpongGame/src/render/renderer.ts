@@ -3,6 +3,7 @@ import type { GameState } from '../core/game.ts'
 import { PADDLE, TABLE } from '../core/constants.ts'
 import { createScene } from './scene.ts'
 import { applyPaddleTransform, createBall, createPaddle } from './meshes.ts'
+import { fitFraming, viewOffset, type Framing } from './view.ts'
 
 /** 拖尾保留的历史点数 */
 const TRAIL_LENGTH = 18
@@ -42,6 +43,11 @@ export class GameRenderer {
   private scene: THREE.Scene
   private camera: THREE.PerspectiveCamera
   private container: HTMLElement
+
+  /** 当前生效的取景（随宽高比和显示尺寸变化） */
+  private framing: Framing = fitFraming(1, 1)
+  /** 显示尺寸倍率：1 = 原样 */
+  private displaySize = 1
 
   private ball: THREE.Mesh
   private playerPaddle: THREE.Group
@@ -108,9 +114,45 @@ export class GameRenderer {
   private resize(): void {
     const w = this.container.clientWidth || 1
     const h = this.container.clientHeight || 1
-    this.camera.aspect = w / h
-    this.camera.updateProjectionMatrix()
+    const aspect = w / h
+    this.camera.aspect = aspect
+    this.applyFraming(aspect)
     this.renderer.setSize(w, h, false)
+  }
+
+  /**
+   * 按当前宽高比和显示尺寸重新算取景。
+   *
+   * 宽高比变了（转屏、窗口缩放、手机横竖屏切换）或者用户改了显示尺寸，
+   * 都要重算：球拍必须始终留在画面里，球台在不同屏幕上看起来也要差不多大。
+   *
+   * 注意：相机位置和朝向**永远不动**，改的只有镜头张角和裁剪窗口。
+   */
+  private applyFraming(aspect: number): void {
+    this.framing = fitFraming(aspect, this.displaySize)
+    const w = this.container.clientWidth || 1
+    const h = this.container.clientHeight || 1
+    const offset = viewOffset(w, h, this.framing)
+    // 虚拟大图的张角（裁剪窗口按它换算成实际张角）
+    this.camera.fov = this.framing.sourceFov
+    this.camera.setViewOffset(
+      offset.fullWidth,
+      offset.fullHeight,
+      offset.x,
+      offset.y,
+      offset.width,
+      offset.height,
+    )
+    // 相机位置锁死，只留 x 给每帧的横向跟随用
+    this.camera.position.y = this.framing.position.y
+    this.camera.position.z = this.framing.position.z
+    this.camera.lookAt(this.framing.target.x, this.framing.target.y, this.framing.target.z)
+  }
+
+  /** 设置显示尺寸倍率（1 = 原样），立刻生效，不用重开一局 */
+  setDisplaySize(size: number): void {
+    this.displaySize = size
+    this.applyFraming(this.camera.aspect)
   }
 
   /** 把游戏状态同步到场景 */
@@ -131,7 +173,11 @@ export class GameRenderer {
     // 相机跟随我方横向位置（轻微，增加临场感）
     const targetX = state.playerPaddle.x * 0.22
     this.camera.position.x += (targetX - this.camera.position.x) * 0.08
-    this.camera.lookAt(this.camera.position.x * 0.4, 0.12, 0.8)
+    this.camera.lookAt(
+      this.camera.position.x * 0.4,
+      this.framing.target.y,
+      this.framing.target.z,
+    )
   }
 
   /**
