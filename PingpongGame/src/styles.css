@@ -423,16 +423,49 @@ body {
   top: 64px;
   right: 18px;
   width: 288px;
-  padding: 16px;
+  /* 选项越来越多，屏幕矮的时候排不下，所以面板本身要能滚 */
+  max-height: calc(100vh - 64px - 18px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* 上边距交给吸顶的标题自己带（padding: 0 16px 16px），
+     这样滚动时内容不会从标题上方的留白里透出来 */
+  padding: 0 16px 16px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
   backdrop-filter: blur(14px);
   font-size: 13px;
+  /* 细滚动条，别喧宾夺主 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.settings::-webkit-scrollbar {
+  width: 8px;
+}
+
+.settings::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+}
+
+.settings::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
 }
 
 .settings h3 {
+  /* 面板能滚了，标题跟着吸顶，滚到哪儿都知道自己在设置里 */
+  position: sticky;
+  top: 0;
+  z-index: 1;
   margin: 0 0 12px;
+  /* 面板自己的上边距挪到标题身上，吸顶时视觉间距才不变 */
+  padding: 16px 0 10px;
+  background: #0e162a;
   font-size: 13px;
   color: var(--muted);
   font-weight: 600;
