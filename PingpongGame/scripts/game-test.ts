@@ -231,8 +231,18 @@ console.log('\n=== 提前预测软吸附 ===')
     prediction !== null && crossingX !== null && Math.abs(prediction - crossingX) < 1e-9)
 
   const target = (prediction ?? 0) - 0.2
-  function prepare(ball: Ball, bounced: boolean): PingPongGame {
-    const game = new PingPongGame({ softAlign: true, slowMotion: false, autoHeight: false })
+  function prepare(
+    ball: Ball,
+    bounced: boolean,
+    options: { predictionAssist?: boolean; softAlign?: boolean; autoMove?: boolean } = {},
+  ): PingPongGame {
+    const game = new PingPongGame({
+      predictionAssist: options.predictionAssist ?? true,
+      softAlign: options.softAlign ?? true,
+      autoMove: options.autoMove ?? false,
+      slowMotion: false,
+      autoHeight: false,
+    })
     game.start()
     game.state.phase = 'rally'
     game.state.lastHitter = 'opponent'
@@ -252,7 +262,7 @@ console.log('\n=== 提前预测软吸附 ===')
   }
   const earlyOffset = early.state.playerPaddle.x - target
   assert('对手击球后、我方落台前显示预测并轻柔引导',
-    !early.state.playerWindowOpen && early.state.softAlignTargetX !== null && earlyOffset > 0 && !swung)
+    !early.state.playerWindowOpen && early.state.predictionTargetX !== null && earlyOffset > 0 && !swung)
   if (afterBounce) {
     const late = prepare(afterBounce, true)
     for (let i = 0; i < 3; i++) late.step(FIXED_DT)
@@ -275,22 +285,42 @@ console.log('\n=== 提前预测软吸附 ===')
 
   early.state.ball = { pos: { x: 0, y: 0.1, z: 0.004 }, vel: { x: 0, y: -1, z: -3 }, spin: 0 }
   early.step(FIXED_DT)
-  assert('实际触网立即移除预测标记', early.state.softAlignTargetX === null)
+  assert('实际触网立即移除预测标记', early.state.predictionTargetX === null)
   early.state.ball = { pos: { ...incoming.pos }, vel: { ...incoming.vel }, spin: incoming.spin }
-  early.refreshSoftAlignPrediction()
+  early.refreshPrediction()
   early.options.autoMove = true
-  early.refreshSoftAlignPrediction()
-  assert('辅助移动开启时隐藏预测标记', early.state.softAlignTargetX === null)
+  early.refreshPrediction()
+  assert('辅助移动开启时仍可显示预测', early.state.predictionTargetX !== null)
   early.options.autoMove = false
-  early.refreshSoftAlignPrediction()
-  assert('关闭辅助移动后立即恢复预测', early.state.softAlignTargetX !== null)
+  early.refreshPrediction()
   early.options.softAlign = false
-  early.refreshSoftAlignPrediction()
-  assert('关闭软吸附时立即隐藏预测标记', early.state.softAlignTargetX === null)
-  early.options.softAlign = true
+  early.refreshPrediction()
+  assert('关闭软吸附时辅助预测仍然显示', early.state.predictionTargetX !== null)
+  early.options.predictionAssist = false
+  early.refreshPrediction()
+  assert('关闭辅助预测时立即隐藏标记', early.state.predictionTargetX === null)
+  early.options.predictionAssist = true
   early.state.lastHitter = null
-  early.refreshSoftAlignPrediction()
-  assert('对手尚未击球时不显示预测', early.state.softAlignTargetX === null)
+  early.refreshPrediction()
+  assert('对手尚未击球时不显示预测', early.state.predictionTargetX === null)
+
+  const combinations = [
+    { predictionAssist: false, softAlign: false },
+    { predictionAssist: true, softAlign: false },
+    { predictionAssist: false, softAlign: true },
+    { predictionAssist: true, softAlign: true },
+  ].map((options) => {
+    const game = prepare(incoming, false, options)
+    for (let i = 0; i < 18; i++) game.step(FIXED_DT)
+    return { marker: game.state.predictionTargetX, offset: game.state.playerPaddle.x - target }
+  })
+  assert('辅助预测独立控制标记，不改变球拍位置',
+    combinations[0].marker === null && combinations[1].marker !== null &&
+      combinations[0].offset === 0 && combinations[1].offset === 0)
+  assert('仅软吸附时仍有引导但不显示标记',
+    combinations[2].marker === null && combinations[2].offset > 0)
+  assert('同时开启时显示标记且引导与单独软吸附一致',
+    combinations[3].marker !== null && Math.abs(combinations[3].offset - combinations[2].offset) < 1e-9)
 }
 
 // ---------------------------------------------------------------- 1. 停顿不锁死

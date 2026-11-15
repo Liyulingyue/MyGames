@@ -172,6 +172,7 @@ export default function App() {
   const [autoMove, setAutoMove] = useState(false)
   const [autoSwing, setAutoSwing] = useState(false)
   const [hitAssist, setHitAssist] = useState(true)
+  const [predictionAssist, setPredictionAssist] = useState(false)
   const [softAlign, setSoftAlign] = useState(false)
   const [softAlignStrength, setSoftAlignStrength] = useState(0.6)
   /**
@@ -239,6 +240,7 @@ export default function App() {
   const autoMoveRef = useRef(autoMove)
   const autoSwingRef = useRef(autoSwing)
   const hitAssistRef = useRef(hitAssist)
+  const predictionAssistRef = useRef(predictionAssist)
   const softAlignRef = useRef(softAlign)
   const softAlignStrengthRef = useRef(softAlignStrength)
   const swingSourceRef = useRef(swingSource)
@@ -261,6 +263,7 @@ export default function App() {
   autoMoveRef.current = autoMove
   autoSwingRef.current = autoSwing
   hitAssistRef.current = hitAssist
+  predictionAssistRef.current = predictionAssist
   softAlignRef.current = softAlign
   softAlignStrengthRef.current = softAlignStrength
   swingSourceRef.current = swingSource
@@ -485,6 +488,7 @@ export default function App() {
       autoMove: autoMoveRef.current,
       autoSwing: autoSwingRef.current,
       hitAssist: hitAssistRef.current,
+      predictionAssist: predictionAssistRef.current,
       softAlign: softAlignRef.current,
       softAlignStrength: softAlignStrengthRef.current,
     })
@@ -981,14 +985,15 @@ export default function App() {
     game.options.autoMove = autoMove
     game.options.autoSwing = autoSwing
     game.options.hitAssist = hitAssist
+    game.options.predictionAssist = predictionAssist
     game.options.softAlign = softAlign
     game.options.softAlignStrength = softAlignStrength
-    game.refreshSoftAlignPrediction()
+    game.refreshPrediction()
     if (pausedRef.current && rendererRef.current) {
       rendererRef.current.sync(game.state)
       rendererRef.current.render()
     }
-  }, [timeScale, autoMove, autoSwing, hitAssist, softAlign, softAlignStrength])
+  }, [timeScale, autoMove, autoSwing, hitAssist, predictionAssist, softAlign, softAlignStrength])
 
   // 显示尺寸实时生效（只动相机，物理完全不受影响）
   useEffect(() => {
@@ -1170,6 +1175,7 @@ export default function App() {
               <span>对手：{difficulty === 'easy' ? '简单' : difficulty === 'normal' ? '普通' : '困难'}</span>
               <span>球速：{timeScale.toFixed(2)}x</span>
               <span>手动击球辅助：{hitAssist ? '开' : '关'}</span>
+              <span>辅助预测：{predictionAssist ? '开' : '关'}</span>
               <span>软吸附：{softAlign ? autoMove ? '自动跟球优先' : `${Math.round(softAlignStrength * 100)}%` : '关'}</span>
               <span>音效：{soundOn ? `${Math.round(soundVolume * 100)}%` : '关闭'}</span>
               <p>静态预览不模拟对局；操作、球速和辅助效果需开始游戏体验。</p>
@@ -1607,6 +1613,18 @@ export default function App() {
                 </div>
 
                 <label className="setting switch">
+                  <span>辅助预测</span>
+                  <input
+                    type="checkbox"
+                    checked={predictionAssist}
+                    onChange={(e) => setPredictionAssist(e.target.checked)}
+                  />
+                </label>
+                <div className="setting-hint">
+                  对手击球后，球拍上方的青色圆环标示预测横向位置；只显示提示，不移动球拍。
+                </div>
+
+                <label className="setting switch">
                   <span>软吸附</span>
                   <input
                     type="checkbox"
@@ -1615,7 +1633,7 @@ export default function App() {
                   />
                 </label>
                 <div className="setting-hint">
-                  对手击球后，球拍上方的青色圆环标示预测横向位置；接近时轻微引导，落台后逐渐加强。仍需自己移动和挥拍，辅助移动开启时优先自动跟球。
+                  接近预测位置时轻微引导，落台后逐渐加强。仍需自己移动和挥拍；辅助移动开启时优先自动跟球。
                 </div>
                 <div className="setting">
                   <div className="setting-label">

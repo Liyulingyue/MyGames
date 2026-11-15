@@ -217,9 +217,9 @@ export class GameRenderer {
     applyPaddleTransform(this.opponentPaddle, state.opponentPaddle, -0.18)
 
     this.opponent.sync(state.opponentPaddle, this.opponentPaddle)
-    this.alignMarker.visible = state.softAlignTargetX !== null
-    if (state.softAlignTargetX !== null) {
-      this.alignMarker.position.set(state.softAlignTargetX, state.playerPaddle.y + 0.28, PADDLE.homeZ + 0.02)
+    this.alignMarker.visible = state.predictionTargetX !== null
+    if (state.predictionTargetX !== null) {
+      this.alignMarker.position.set(state.predictionTargetX, state.playerPaddle.y + 0.28, PADDLE.homeZ + 0.02)
     }
 
     // 相机跟随我方横向位置（轻微，增加临场感）

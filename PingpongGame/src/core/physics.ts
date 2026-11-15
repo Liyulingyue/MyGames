@@ -279,7 +279,7 @@ export interface Prediction {
   reached: boolean
 }
 
-/** 预测合法来球穿过我方拍面时的横向位置；触网、出界或落台次数不合法则不引导。 */
+/** 预测合法来球穿过我方拍面时的横向位置；触网、出界或落台次数不合法则返回 null。 */
 export function predictPlayerInterceptX(ball: Ball, alreadyBounced: boolean): number | null {
   if (ball.vel.z >= 0 || ball.pos.z <= PADDLE.homeZ) return null
   const sim: Ball = { pos: { ...ball.pos }, vel: { ...ball.vel }, spin: ball.spin }
