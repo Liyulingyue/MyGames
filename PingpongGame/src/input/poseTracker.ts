@@ -1,5 +1,4 @@
-import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
-import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
+import type { NormalizedLandmark, PoseLandmarker as PoseLandmarkerType } from '@mediapipe/tasks-vision'
 
 /** wasm 运行时（CDN，与 npm 包版本保持一致） */
 const WASM_PATH = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/wasm'
@@ -262,7 +261,7 @@ function withTimeout<T>(promise: Promise<T>, seconds: number, message: string): 
  * 不关心游戏规则。挥拍的判定逻辑在 swingDetector.ts。
  */
 export class PoseTracker {
-  private landmarker: PoseLandmarker | null = null
+  private landmarker: PoseLandmarkerType | null = null
   private stream: MediaStream | null = null
   private video: HTMLVideoElement | null = null
   private lastVideoTime = -1
@@ -301,6 +300,7 @@ export class PoseTracker {
   /** 初始化模型（需要网络，wasm 与模型都从 CDN 加载） */
   async init(onProgress?: (progress: PoseLoadProgress) => void): Promise<void> {
     onProgress?.({ stage: 'wasm', ratio: null })
+    const { FilesetResolver, PoseLandmarker } = await import('@mediapipe/tasks-vision')
     const fileset = await withTimeout(
       FilesetResolver.forVisionTasks(WASM_PATH),
       MODEL_TIMEOUT,

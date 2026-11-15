@@ -68,7 +68,10 @@ export class GameRenderer {
 
   /** 球的拖尾：历史位置上的渐隐光点 */
   private trail: THREE.Sprite[] = []
-  private trailHistory: THREE.Vector3[] = []
+  private readonly trailHistory = Array.from({ length: 48 }, () => new THREE.Vector3())
+  private readonly trailSamples = Array.from({ length: TRAIL_LENGTH }, () => new THREE.Vector3())
+  private trailHistoryHead = -1
+  private trailHistoryCount = 0
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -107,7 +110,6 @@ export class GameRenderer {
       )
       sprite.scale.setScalar(0.05)
       this.trail.push(sprite)
-      this.trailHistory.push(new THREE.Vector3())
       this.scene.add(sprite)
     }
 
@@ -218,23 +220,23 @@ export class GameRenderer {
   private updateTrail(state: GameState): void {
     const speed = Math.hypot(state.ball.vel.x, state.ball.vel.y, state.ball.vel.z)
 
-    // 新位置插到最前面
-    this.trailHistory.unshift(new THREE.Vector3(state.ball.pos.x, state.ball.pos.y, state.ball.pos.z))
-    if (this.trailHistory.length > 48) this.trailHistory.length = 48
+    this.trailHistoryHead = (this.trailHistoryHead + 1) % this.trailHistory.length
+    this.trailHistory[this.trailHistoryHead].set(state.ball.pos.x, state.ball.pos.y, state.ball.pos.z)
+    this.trailHistoryCount = Math.min(this.trailHistoryCount + 1, this.trailHistory.length)
 
     const visible = speed > 1.0
 
     // 沿轨迹等弧长重采样（从新到旧）
-    const samples: THREE.Vector3[] = []
+    let sampleCount = 0
     let carry = 0
-    for (let i = 1; i < this.trailHistory.length; i++) {
-      const a = this.trailHistory[i - 1]
-      const b = this.trailHistory[i]
+    for (let i = 1; i < this.trailHistoryCount && sampleCount < TRAIL_LENGTH; i++) {
+      const a = this.trailHistory[(this.trailHistoryHead - i + 1 + this.trailHistory.length) % this.trailHistory.length]
+      const b = this.trailHistory[(this.trailHistoryHead - i + this.trailHistory.length) % this.trailHistory.length]
       const seg = a.distanceTo(b)
       if (seg < 1e-6) continue
       let t = carry
-      while (t <= seg && samples.length < TRAIL_LENGTH) {
-        samples.push(new THREE.Vector3().lerpVectors(a, b, t / seg))
+      while (t <= seg && sampleCount < TRAIL_LENGTH) {
+        this.trailSamples[sampleCount++].lerpVectors(a, b, t / seg)
         t += TRAIL_STEP
       }
       carry = t - seg
@@ -242,11 +244,11 @@ export class GameRenderer {
 
     for (let i = 0; i < this.trail.length; i++) {
       const sprite = this.trail[i]
-      if (!visible || i >= samples.length) {
+      if (!visible || i >= sampleCount) {
         sprite.material.opacity = 0
         continue
       }
-      sprite.position.copy(samples[i])
+      sprite.position.copy(this.trailSamples[i])
       // 越靠后越淡越小
       const k = 1 - i / TRAIL_LENGTH
       sprite.material.opacity = 0.5 * k * k
@@ -262,15 +264,22 @@ export class GameRenderer {
     this.resizeObserver.disconnect()
     this.renderer.dispose()
     this.renderer.domElement.remove()
+    const textures = new Set<THREE.Texture>()
     this.scene.traverse((obj) => {
       // 拖尾是精灵，也要一起释放（贴图挂在材质上）
       if (obj instanceof THREE.Mesh || obj instanceof THREE.Sprite) {
         obj.geometry?.dispose?.()
         const material = obj.material
-        if (Array.isArray(material)) material.forEach((m) => m.dispose())
-        else material.dispose()
+        const materials = Array.isArray(material) ? material : [material]
+        for (const item of materials) {
+          for (const value of Object.values(item)) {
+            if (value instanceof THREE.Texture) textures.add(value)
+          }
+          item.dispose()
+        }
       }
     })
+    textures.forEach((texture) => texture.dispose())
   }
 }
 

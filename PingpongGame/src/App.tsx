@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { PingPongGame } from './core/game.ts'
 import { AI_PRESETS, PLAYER, TARGET_SCORE } from './core/constants.ts'
 import type { Phase, Side } from './core/types.ts'
-import { GameRenderer } from './render/renderer.ts'
+import type { GameRenderer } from './render/renderer.ts'
 import { CAMERA_LIMITS, DEFAULT_CAMERA, VIEW, checkFrame, type CameraPose } from './render/view.ts'
 import { PoseTracker, isVisible } from './input/poseTracker.ts'
 import type { MotionSource, PoseFrame, PoseLoadProgress } from './input/poseTracker.ts'
@@ -205,11 +205,13 @@ export default function App() {
 
   const gameRef = useRef<PingPongGame | null>(null)
   const rendererRef = useRef<GameRenderer | null>(null)
+  const rendererModuleRef = useRef<typeof import('./render/renderer.ts') | null>(null)
   const trackerRef = useRef<PoseTracker | null>(null)
   const detectorRef = useRef<SwingDetector | null>(null)
   const keyboardRef = useRef<KeyboardController | null>(null)
   const mouseRef = useRef<MouseController | null>(null)
   const soundRef = useRef<SoundEngine | null>(null)
+  const cameraSetupPromiseRef = useRef<Promise<boolean> | null>(null)
 
   // 放进 ref，主循环里就不用依赖 state 变化而重启
   const inputModeRef = useRef<InputMode>(inputMode)
@@ -301,40 +303,52 @@ export default function App() {
   }, [])
 
   /** 启动摄像头与姿态模型。成功返回 true，失败返回 false（已自动回退到键盘模式） */
-  const setupCamera = useCallback(async (): Promise<boolean> => {
-    setBooting(true)
-    setBootError(null)
-    setLoadProgress({ stage: 'wasm', ratio: null })
-    setHud((h) => ({ ...h, cameraState: 'loading', cameraError: null }))
-    try {
-      const tracker = new PoseTracker()
-      await tracker.init((progress) => setLoadProgress(progress))
-      setLoadProgress({ stage: 'camera', ratio: null })
-      const video = await tracker.startCamera()
-      trackerRef.current = tracker
+  const setupCamera = useCallback((): Promise<boolean> => {
+    if (trackerRef.current) return Promise.resolve(true)
+    if (cameraSetupPromiseRef.current) return cameraSetupPromiseRef.current
 
-      // 把摄像头画面挂到预览容器里
-      if (previewRef.current) {
-        previewRef.current.appendChild(video)
-        video.style.width = '100%'
-        video.style.height = '100%'
-        video.style.objectFit = 'cover'
-        video.style.transform = 'scaleX(-1)'
+    const setup = async (): Promise<boolean> => {
+      setBooting(true)
+      setBootError(null)
+      setLoadProgress({ stage: 'wasm', ratio: null })
+      setHud((h) => ({ ...h, cameraState: 'loading', cameraError: null }))
+      let tracker: PoseTracker | null = null
+      try {
+        tracker = new PoseTracker()
+        await tracker.init((progress) => setLoadProgress(progress))
+        setLoadProgress({ stage: 'camera', ratio: null })
+        const video = await tracker.startCamera()
+        trackerRef.current = tracker
+
+        // 把摄像头画面挂到预览容器里
+        if (previewRef.current) {
+          previewRef.current.appendChild(video)
+          video.style.width = '100%'
+          video.style.height = '100%'
+          video.style.objectFit = 'cover'
+          video.style.transform = 'scaleX(-1)'
+        }
+
+        setHud((h) => ({ ...h, cameraState: 'ready', cameraError: null }))
+        return true
+      } catch (err) {
+        tracker?.close()
+        const message = err instanceof Error ? err.message : String(err)
+        setBootError(`摄像头 / 模型初始化失败：${message}\n已自动切换到键盘模式，可以先开始游戏。`)
+        // 游戏中途切到体感模式失败时，错误要显示在 HUD 上（菜单上的提示看不到）
+        setHud((h) => ({ ...h, cameraState: 'error', cameraError: message }))
+        switchInputMode('keyboard')
+        return false
+      } finally {
+        cameraSetupPromiseRef.current = null
+        setBooting(false)
+        setLoadProgress(null)
       }
-
-      setHud((h) => ({ ...h, cameraState: 'ready', cameraError: null }))
-      return true
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      setBootError(`摄像头 / 模型初始化失败：${message}\n已自动切换到键盘模式，可以先开始游戏。`)
-      // 游戏中途切到体感模式失败时，错误要显示在 HUD 上（菜单上的提示看不到）
-      setHud((h) => ({ ...h, cameraState: 'error', cameraError: message }))
-      switchInputMode('keyboard')
-      return false
-    } finally {
-      setBooting(false)
-      setLoadProgress(null)
     }
+
+    const promise = setup()
+    cameraSetupPromiseRef.current = promise
+    return promise
   }, [switchInputMode])
 
   cameraSetupRef.current = setupCamera
@@ -346,6 +360,18 @@ export default function App() {
       // 摄像头没起来就留在开始界面并给出提示，避免玩家对着黑屏找不到原因
       const ok = await setupCamera()
       if (!ok) return
+    }
+    if (!rendererModuleRef.current) {
+      setBooting(true)
+      try {
+        rendererModuleRef.current = await import('./render/renderer.ts')
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setBootError(`3D 渲染器加载失败：${message}`)
+        return
+      } finally {
+        setBooting(false)
+      }
     }
     ensureKeyboard()
     ensureDetector()
@@ -380,6 +406,8 @@ export default function App() {
     if (screen !== 'playing') return
     const container = containerRef.current
     if (!container) return
+    const Renderer = rendererModuleRef.current?.GameRenderer
+    if (!Renderer) return
 
     const game = new PingPongGame({
       seed: Math.floor(Math.random() * 1e9),
@@ -393,7 +421,7 @@ export default function App() {
     gameRef.current = game
     game.start()
 
-    const renderer = new GameRenderer(container)
+    const renderer = new Renderer(container)
     rendererRef.current = renderer
     // 新渲染器要沿用当前的取景设置（重开一局也不丢）
     renderer.setDisplaySize(displaySizeRef.current)
@@ -1538,7 +1566,7 @@ export default function App() {
             {booting && <LoadProgressBar progress={loadProgress} />}
 
             <button className="start-btn" onClick={startGame} disabled={booting}>
-              {booting ? '正在准备体感模式…' : '开始游戏'}
+              {booting ? '正在准备游戏…' : '开始游戏'}
             </button>
 
             <p className="start-footnote">

@@ -109,6 +109,7 @@ export class PingPongGame {
   private ai: AIState
   private accumulator = 0
   private pendingEvents: GameEvent[] = []
+  private collisions: CollisionEvent[] = []
   private playerTargetX = 0
   private serveCount = 0
 
@@ -341,7 +342,8 @@ export class PingPongGame {
     }
 
     // —— 物理推进 ——
-    const collisions: CollisionEvent[] = []
+    const collisions = this.collisions
+    collisions.length = 0
     stepBall(s.ball, dt, collisions)
 
     for (const c of collisions) {
