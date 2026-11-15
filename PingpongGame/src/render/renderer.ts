@@ -4,6 +4,33 @@ import { PADDLE, TABLE } from '../core/constants.ts'
 import { createScene } from './scene.ts'
 import { applyPaddleTransform, createBall, createPaddle } from './meshes.ts'
 
+/** 拖尾保留的历史点数 */
+const TRAIL_LENGTH = 18
+/** 拖尾光点之间的弧长间隔（米）：比球略大，保证连成一条光带而不是一串珠子 */
+const TRAIL_STEP = 0.03
+
+/**
+ * 径向渐变贴图：拖尾光点用它。
+ *
+ * 比在 3D 里算灯光便宜得多，也更容易控制形状。
+ */
+function createRadialTexture(inner: string, outer: string, falloff = 0.45): THREE.CanvasTexture {
+  const S = 128
+  const canvas = document.createElement('canvas')
+  canvas.width = S
+  canvas.height = S
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2)
+  g.addColorStop(0, inner)
+  g.addColorStop(falloff, outer)
+  g.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, S, S)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
 /**
  * Three.js 表现层。
  *
@@ -21,6 +48,10 @@ export class GameRenderer {
   private opponentPaddle: THREE.Group
   private opponent: THREE.Group
   private resizeObserver: ResizeObserver
+
+  /** 球的拖尾：历史位置上的渐隐光点 */
+  private trail: THREE.Sprite[] = []
+  private trailHistory: THREE.Vector3[] = []
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -42,6 +73,26 @@ export class GameRenderer {
 
     this.ball = createBall()
     this.scene.add(this.ball)
+
+    // —— 拖尾 ——
+    // 用一串精灵而不是一条线：精灵永远正对相机，速度快时也不会变成
+    // 屏幕上的一根细线，而是像彗尾一样一团光。
+    const trailTexture = createRadialTexture('rgba(255,246,225,0.95)', 'rgba(255,214,150,0.35)', 0.35)
+    for (let i = 0; i < TRAIL_LENGTH; i++) {
+      const sprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: trailTexture,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          opacity: 0,
+        }),
+      )
+      sprite.scale.setScalar(0.05)
+      this.trail.push(sprite)
+      this.trailHistory.push(new THREE.Vector3())
+      this.scene.add(sprite)
+    }
 
     this.playerPaddle = createPaddle('#c8342f', '#c9a227')
     this.scene.add(this.playerPaddle)
@@ -68,6 +119,8 @@ export class GameRenderer {
     this.ball.rotation.x += state.ball.vel.z * 0.08
     this.ball.rotation.z -= state.ball.vel.x * 0.08
 
+    this.updateTrail(state)
+
     applyPaddleTransform(this.playerPaddle, state.playerPaddle)
     applyPaddleTransform(this.opponentPaddle, state.opponentPaddle)
 
@@ -81,6 +134,54 @@ export class GameRenderer {
     this.camera.lookAt(this.camera.position.x * 0.4, 0.12, 0.8)
   }
 
+  /**
+   * 更新拖尾。
+   *
+   * 直接按帧存历史点的话，高速时相邻光点会拉开距离，
+   * 拖尾看起来像"一串珠子"而不是一条光带。
+   * 所以这里先沿轨迹按**固定弧长**重采样，再把光点摆上去。
+   *
+   * 球慢下来的时候拖尾收掉（否则静止的球也挂着一团光，像贴纸）。
+   */
+  private updateTrail(state: GameState): void {
+    const speed = Math.hypot(state.ball.vel.x, state.ball.vel.y, state.ball.vel.z)
+
+    // 新位置插到最前面
+    this.trailHistory.unshift(new THREE.Vector3(state.ball.pos.x, state.ball.pos.y, state.ball.pos.z))
+    if (this.trailHistory.length > 48) this.trailHistory.length = 48
+
+    const visible = speed > 1.0
+
+    // 沿轨迹等弧长重采样（从新到旧）
+    const samples: THREE.Vector3[] = []
+    let carry = 0
+    for (let i = 1; i < this.trailHistory.length; i++) {
+      const a = this.trailHistory[i - 1]
+      const b = this.trailHistory[i]
+      const seg = a.distanceTo(b)
+      if (seg < 1e-6) continue
+      let t = carry
+      while (t <= seg && samples.length < TRAIL_LENGTH) {
+        samples.push(new THREE.Vector3().lerpVectors(a, b, t / seg))
+        t += TRAIL_STEP
+      }
+      carry = t - seg
+    }
+
+    for (let i = 0; i < this.trail.length; i++) {
+      const sprite = this.trail[i]
+      if (!visible || i >= samples.length) {
+        sprite.material.opacity = 0
+        continue
+      }
+      sprite.position.copy(samples[i])
+      // 越靠后越淡越小
+      const k = 1 - i / TRAIL_LENGTH
+      sprite.material.opacity = 0.5 * k * k
+      sprite.scale.setScalar(0.014 + 0.042 * k)
+    }
+  }
+
   render(): void {
     this.renderer.render(this.scene, this.camera)
   }
@@ -90,8 +191,9 @@ export class GameRenderer {
     this.renderer.dispose()
     this.renderer.domElement.remove()
     this.scene.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) {
-        obj.geometry.dispose()
+      // 拖尾是精灵，也要一起释放（贴图挂在材质上）
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.Sprite) {
+        obj.geometry?.dispose?.()
         const material = obj.material
         if (Array.isArray(material)) material.forEach((m) => m.dispose())
         else material.dispose()

@@ -9,6 +9,7 @@ import { SwingDetector, paddleTargetFromPose, pickArmSample, handOf, isMouseSwin
 import type { SwingSource } from './input/swingDetector.ts'
 import { KeyboardController } from './input/keyboard.ts'
 import { MouseController } from './input/mouse.ts'
+import { SoundEngine } from './input/sound.ts'
 
 type InputMode = 'keyboard' | 'pose' | 'mouse'
 type Difficulty = 'easy' | 'normal' | 'hard'
@@ -125,6 +126,10 @@ export default function App() {
    * - mouse：不用手腕——走位仍然跟着身体，击球改用鼠标左键
    */
   const [swingSource, setSwingSource] = useState<SwingSource>('both')
+  /** 音效开关 */
+  const [soundOn, setSoundOn] = useState(true)
+  /** 音量 0~1 */
+  const [soundVolume, setSoundVolume] = useState(0.65)
   /** 用户是否手动调过球速：没调过的话，切到体感模式会自动用更慢的球 */
   const speedTouchedRef = useRef(false)
   const [hud, setHud] = useState<HudState>(INITIAL_HUD)
@@ -141,6 +146,7 @@ export default function App() {
   const detectorRef = useRef<SwingDetector | null>(null)
   const keyboardRef = useRef<KeyboardController | null>(null)
   const mouseRef = useRef<MouseController | null>(null)
+  const soundRef = useRef<SoundEngine | null>(null)
 
   // 放进 ref，主循环里就不用依赖 state 变化而重启
   const inputModeRef = useRef<InputMode>(inputMode)
@@ -217,6 +223,17 @@ export default function App() {
     return detectorRef.current
   }, [])
 
+  /**
+   * 音效引擎：全程只建一个实例。
+   *
+   * AudioContext 必须在用户手势里创建，所以真正"解锁"发生在点开始游戏时；
+   * 这里只是把实例准备好。
+   */
+  const ensureSound = useCallback((): SoundEngine => {
+    if (!soundRef.current) soundRef.current = new SoundEngine()
+    return soundRef.current
+  }, [])
+
   /** 启动摄像头与姿态模型。成功返回 true，失败返回 false（已自动回退到键盘模式） */
   const setupCamera = useCallback(async (): Promise<boolean> => {
     setBooting(true)
@@ -254,6 +271,8 @@ export default function App() {
   cameraSetupRef.current = setupCamera
 
   const startGame = useCallback(async () => {
+    // 浏览器规定 AudioContext 必须在用户手势里解锁，否则一直是挂起状态
+    ensureSound().unlock()
     if (inputModeRef.current === 'pose' && !trackerRef.current) {
       // 摄像头没起来就留在开始界面并给出提示，避免玩家对着黑屏找不到原因
       const ok = await setupCamera()
@@ -262,7 +281,7 @@ export default function App() {
     ensureKeyboard()
     ensureDetector()
     setScreen('playing')
-  }, [setupCamera, ensureKeyboard, ensureDetector])
+  }, [setupCamera, ensureKeyboard, ensureDetector, ensureSound])
 
   /** 重新开一局（比分清零，球拍回到中间） */
   const restartGame = useCallback(() => {
@@ -370,6 +389,7 @@ export default function App() {
       threshold: swingThresholdRef.current,
       verticalRange: verticalThresholdOf(swingThresholdRef.current),
     })
+    const sound = ensureSound()
 
     let raf = 0
     let last = performance.now()
@@ -378,6 +398,8 @@ export default function App() {
     let fpsFrames = 0
     let fps = 0
     let messageUntil = 0
+    /** 上一次的回合阶段，用来在"发球"时响一声提示 */
+    let lastPhase = ''
     /** 最近一帧姿态数据（真实摄像头或调试注入） */
     let lastFrame: PoseFrame | null = null
 
@@ -537,7 +559,36 @@ export default function App() {
 
       // ---- 推进游戏 ----
       const events = game.step(dt)
+      // 发球提示：进入 serve 阶段时响一声
+      if (game.state.phase === 'serve' && lastPhase !== 'serve') sound.play('serve')
+      lastPhase = game.state.phase
+      // 击球的这一帧同时会有 swing 和 paddleHit 两个事件，
+      // 这时只播"啪"，不播挥空的风声——否则每次得分都是两声。
+      const playerHit = events.some((e) => e.type === 'paddleHit' && e.side === 'player')
       for (const ev of events) {
+        switch (ev.type) {
+          case 'paddleHit':
+            sound.play('paddle', ev.power ?? 0.7)
+            break
+          case 'bounce':
+            sound.play('bounce')
+            break
+          case 'netHit':
+            sound.play('net')
+            break
+          case 'swing':
+            if (!playerHit) sound.play('whiff', ev.power ?? 0.6)
+            break
+          case 'point':
+            sound.play('point')
+            break
+          case 'gameOver':
+            sound.play(ev.winner === 'player' ? 'win' : 'lose')
+            break
+          default:
+            break
+        }
+
         if (ev.type === 'point') {
           const won = ev.winner === 'player'
           setHud((h) => ({
@@ -613,7 +664,7 @@ export default function App() {
       rendererRef.current = null
       gameRef.current = null
     }
-  }, [screen, ensureKeyboard, ensureDetector, ensureMouse])
+  }, [screen, ensureKeyboard, ensureDetector, ensureMouse, ensureSound])
 
   // 难度 / 慢动作实时生效（不重开一局）
   useEffect(() => {
@@ -623,6 +674,23 @@ export default function App() {
     game.options.aiConfig = AI_PRESETS[difficulty]
     game.options.slowMotion = slowMotion
   }, [difficulty, slowMotion])
+
+  // 音效开关 / 音量实时生效
+  useEffect(() => {
+    const sound = ensureSound()
+    sound.setEnabled(soundOn)
+    sound.setVolume(soundVolume)
+  }, [soundOn, soundVolume, ensureSound])
+
+  // 按钮点击的轻响（全局挂一次，任何按钮都算数）
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest?.('button')) ensureSound().play('ui')
+    }
+    window.addEventListener('click', onClick)
+    return () => window.removeEventListener('click', onClick)
+  }, [ensureSound])
 
   // 挥拍阈值 / 击球来源实时生效（速度阈值与垂直位移阈值一起改）
   useEffect(() => {
@@ -1002,6 +1070,31 @@ export default function App() {
                   onChange={(e) => setSlowMotion(e.target.checked)}
                 />
               </label>
+
+              <label className="setting switch">
+                <span>音效</span>
+                <input
+                  type="checkbox"
+                  checked={soundOn}
+                  onChange={(e) => setSoundOn(e.target.checked)}
+                />
+              </label>
+              <div className="setting-hint">击球、落台、触网、得分的声音都是实时合成的。</div>
+
+              <div className="setting">
+                <div className="setting-label">
+                  <span>音量</span>
+                  <b>{Math.round(soundVolume * 100)}%</b>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={soundVolume}
+                  onChange={(e) => setSoundVolume(Number(e.target.value))}
+                />
+              </div>
 
               <button
                 className="start-btn"
