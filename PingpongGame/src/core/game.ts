@@ -194,6 +194,7 @@ export class PingPongGame {
     p.activeTimer = 0
     p.cooldown = 0
     p.swingAnim = 0
+    this.state.opponentPaddle.swingAnim = 0
 
     this.beginServe()
   }
@@ -282,6 +283,7 @@ export class PingPongGame {
     if (s.phase === 'gameover') return
 
     s.elapsed += dt
+    s.opponentPaddle.swingAnim = Math.max(0, s.opponentPaddle.swingAnim - dt * 3.2)
 
     // 球拍始终跟随输入：得分停顿期间也继续更新，
     // 否则目标会在这段时间里漂移，恢复回合时球拍瞬移一下。

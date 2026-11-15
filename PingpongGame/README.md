@@ -188,6 +188,9 @@ if (isMouseSwing(swingSource)) {
    走位速度有限 + 反应延迟 0.18s，落点太偏时球拍就赶不过去，这是 AI 主要的"接不住"来源。
 5. **故意失误**：`config.missChance = 0.08`，即 AI 有 8% 的概率明明够得着也挥空。
 
+对手以简洁运动员形象呈现：身体随横移轻微倾斜，握拍手跟随球拍与挥拍动画。
+这些动作仅影响画面，不改变 AI 的击球判定或球的物理。
+
 ### 球拍和台面的关系
 
 台面宽 1.525m（半宽 0.7625m），拍面直径 0.15m，球拍固定在台端内侧（z = ±1.28m）。
@@ -499,7 +502,8 @@ src/
 │   └── game.ts        # PingPongGame：状态机 + 规则判定 + 计分
 ├── render/      # Three.js 场景
 │   ├── scene.ts       # 台面、球网、灯光、第一人称相机
-│   ├── meshes.ts      # 球/球拍/对手模型与材质
+│   ├── meshes.ts      # 球与球拍模型
+│   ├── opponent.ts    # 对手模型与动作
 │   └── renderer.ts    # GameRenderer：把 GameState 同步到场景并渲染
 ├── input/       # 输入适配层
 │   ├── poseTracker.ts # MediaPipe PoseLandmarker 封装

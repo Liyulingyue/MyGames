@@ -25,8 +25,11 @@ import {
   type Framing,
 } from '../src/render/view.ts'
 import { PADDLE, TABLE } from '../src/core/constants.ts'
-import { Box3, BoxGeometry, Color, Mesh } from 'three'
+import { Box3, BoxGeometry, Color, Mesh, Vector3 } from 'three'
 import { createScene } from '../src/render/scene.ts'
+import { createOpponent } from '../src/render/opponent.ts'
+import { applyPaddleTransform, createPaddle } from '../src/render/meshes.ts'
+import { PingPongGame } from '../src/core/game.ts'
 
 let failures = 0
 
@@ -360,6 +363,32 @@ console.log('\n=== 画面检查（诊断）能给出一致的结果 ===')
     `  俯角 60° + 高 2.6m：球拍横向 ${steep.paddleX.toFixed(2)}，球拍纵向 ${steep.paddleBottom.toFixed(2)} ~ ${steep.paddleTop.toFixed(2)}`,
   )
   ok('极端位姿下诊断仍然是有限数', Number.isFinite(steep.paddleX) && Number.isFinite(steep.paddleTop))
+}
+
+console.log('\n=== 对手姿态 ===')
+{
+  const opponent = createOpponent()
+  const paddleMesh = createPaddle('#2f5bc8', '#c9a227')
+  const paddle = new PingPongGame().state.opponentPaddle
+  const grip = opponent.group.getObjectByName('opponent-grip')!
+  const upperBody = opponent.group.getObjectByName('opponent-upper-body')!
+  const feet = opponent.group.children.filter((child) => child.name === 'opponent-foot')
+  ok('双脚落在地板上', feet.length === 2 && feet.every((foot) =>
+    Math.abs(new Box3().setFromObject(foot).min.y - TABLE.floorY) < 1e-6))
+
+  const poses = [
+    { x: -PADDLE.rangeX, y: 0.08, vx: -3, swingAnim: 0 },
+    { x: 0, y: 0.25, vx: 0, swingAnim: 0 },
+    { x: PADDLE.rangeX, y: 0.5, vx: 3, swingAnim: 1 },
+  ]
+  ok('移动和挥拍时手始终握住拍柄', poses.every((pose) => {
+    Object.assign(paddle, pose)
+    applyPaddleTransform(paddleMesh, paddle, -0.18)
+    opponent.sync(paddle, paddleMesh)
+    const handle = paddleMesh.localToWorld(new Vector3(0, -PADDLE.radius - 0.05, 0))
+    return grip.getWorldPosition(new Vector3()).distanceTo(handle) < 1e-6
+  }))
+  ok('移动时身体向运动方向倾斜', upperBody.position.x > 0)
 }
 
 console.log('\n=== 场馆环境切换 ===')

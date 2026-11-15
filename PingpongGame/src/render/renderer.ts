@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import type { GameState } from '../core/game.ts'
-import { PADDLE, TABLE } from '../core/constants.ts'
+import { TABLE } from '../core/constants.ts'
 import { createScene, type Environment } from './scene.ts'
 import { applyPaddleTransform, createBall, createPaddle } from './meshes.ts'
 import {
@@ -64,7 +64,7 @@ export class GameRenderer {
   private ball: THREE.Mesh
   private playerPaddle: THREE.Group
   private opponentPaddle: THREE.Group
-  private opponent: THREE.Group
+  private opponent: ReturnType<typeof createScene>['opponent']
   private resizeObserver: ResizeObserver
 
   /** 球的拖尾：历史位置上的渐隐光点 */
@@ -202,11 +202,9 @@ export class GameRenderer {
     this.updateTrail(state)
 
     applyPaddleTransform(this.playerPaddle, state.playerPaddle)
-    applyPaddleTransform(this.opponentPaddle, state.opponentPaddle)
+    applyPaddleTransform(this.opponentPaddle, state.opponentPaddle, -0.18)
 
-    // 对手人形跟随球拍（手臂大致对准拍面）
-    this.opponent.position.x = state.opponentPaddle.x * 0.75
-    this.opponent.position.z = PADDLE.opponentZ + 0.55
+    this.opponent.sync(state.opponentPaddle, this.opponentPaddle)
 
     // 相机跟随我方横向位置（轻微，增加临场感）
     // 跟随量是相对用户设定位的偏移，用户把相机推到左边不会把跟随吃掉。

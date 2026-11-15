@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import { PADDLE, TABLE } from '../core/constants.ts'
+import { TABLE } from '../core/constants.ts'
+import { createOpponent } from './opponent.ts'
 import { DEFAULT_CAMERA, VIEW, resolveCamera } from './view.ts'
 
 export type Environment = 'bright' | 'night'
@@ -89,7 +90,7 @@ export function createScene(): {
   camera: THREE.PerspectiveCamera
   tableTop: THREE.Mesh
   net: THREE.Mesh
-  opponent: THREE.Group
+  opponent: ReturnType<typeof createOpponent>
   setEnvironment: (environment: Environment) => void
 } {
   const scene = new THREE.Scene()
@@ -271,34 +272,8 @@ export function createScene(): {
     scene.add(post)
   }
 
-  // —— 对手（简化人形，站在对方台端后方） ——
-  const opponent = new THREE.Group()
-  const bodyMaterial = new THREE.MeshStandardMaterial({ color: '#2c3e63', roughness: 0.75 })
-  const headMaterial = new THREE.MeshStandardMaterial({ color: '#d9b48f', roughness: 0.85 })
-
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.42, 6, 14), bodyMaterial)
-  torso.position.y = 0.52
-  torso.castShadow = true
-  opponent.add(torso)
-
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 20, 16), headMaterial)
-  head.position.y = 0.9
-  head.castShadow = true
-  opponent.add(head)
-
-  // 双臂
-  const armMaterial = new THREE.MeshStandardMaterial({ color: '#35507d', roughness: 0.75 })
-  const armL = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.3, 4, 10), armMaterial)
-  armL.position.set(-0.21, 0.6, 0)
-  armL.rotation.z = 0.25
-  opponent.add(armL)
-  const armR = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.3, 4, 10), armMaterial)
-  armR.position.set(0.21, 0.6, 0)
-  armR.rotation.z = -0.25
-  opponent.add(armR)
-
-  opponent.position.set(0, TABLE.surfaceY, PADDLE.opponentZ + 0.55)
-  scene.add(opponent)
+  const opponent = createOpponent()
+  scene.add(opponent.group)
 
   return { scene, camera, tableTop, net, opponent, setEnvironment }
 }

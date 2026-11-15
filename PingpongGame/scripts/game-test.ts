@@ -18,6 +18,22 @@ function assert(name: string, ok: boolean, detail = ''): void {
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : `  ${detail}`}`)
 }
 
+console.log('=== 对手挥拍动画 ===')
+{
+  const game = new PingPongGame({ slowMotion: false })
+  game.start()
+  game.state.phase = 'point'
+  game.state.pointTimer = 1
+  game.state.opponentPaddle.swingAnim = 1
+  game.step(FIXED_DT)
+  assert('得分停顿期间对手挥拍动画也会衰减', game.state.opponentPaddle.swingAnim < 1)
+  for (let i = 0; i < 120; i++) game.step(FIXED_DT)
+  assert('挥拍动画回到待机状态', game.state.opponentPaddle.swingAnim === 0)
+  game.state.opponentPaddle.swingAnim = 1
+  game.start()
+  assert('重新开始清除对手挥拍动画', game.state.opponentPaddle.swingAnim === 0)
+}
+
 console.log('=== 手动击球辅助 ===')
 {
   function attempt(
