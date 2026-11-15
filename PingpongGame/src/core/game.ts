@@ -15,6 +15,7 @@ import {
   checkPaddleOverlap,
   checkSwingReach,
   launchTo,
+  predictPlayerInterceptX,
   stepBall,
 } from './physics.ts'
 import type { CollisionEvent, PaddleHit } from './physics.ts'
@@ -80,6 +81,8 @@ export interface GameState {
   lastHitter: Side | null
   /** 挥拍窗口是否打开：球已在我方半场落台，等我挥拍 */
   playerWindowOpen: boolean
+  /** 软吸附预测的球穿过拍面时的横向位置；无合法来球时为 null */
+  softAlignTargetX: number | null
   /** 当前时间倍率（慢动作） */
   timeScale: number
   /** 本回合击球次数 */
@@ -117,6 +120,8 @@ export class PingPongGame {
   private collisions: CollisionEvent[] = []
   private playerTargetX = 0
   private serveCount = 0
+  private predictionTimer = 0
+  private playerBounceAge = 0
 
   constructor(options: GameOptions = {}) {
     const preset = options.ai ?? 'normal'
@@ -164,6 +169,7 @@ export class PingPongGame {
       bounces: { player: 0, opponent: 0 },
       lastHitter: null,
       playerWindowOpen: false,
+      softAlignTargetX: null,
       timeScale: 1,
       rallyHits: 0,
       elapsed: 0,
@@ -195,6 +201,9 @@ export class PingPongGame {
     p.cooldown = 0
     p.swingAnim = 0
     this.state.opponentPaddle.swingAnim = 0
+    this.state.softAlignTargetX = null
+    this.predictionTimer = 0
+    this.playerBounceAge = 0
 
     this.beginServe()
   }
@@ -202,6 +211,13 @@ export class PingPongGame {
   /** 结束当前一局，回到待开始状态 */
   stop(): void {
     this.state.phase = 'idle'
+    this.state.softAlignTargetX = null
+    this.predictionTimer = 0
+  }
+
+  /** 设置变化时刷新预测，包括比赛暂停期间。 */
+  refreshSoftAlignPrediction(): void {
+    this.updateSoftAlignPrediction(0, true)
   }
 
   /**
@@ -284,6 +300,7 @@ export class PingPongGame {
 
     s.elapsed += dt
     s.opponentPaddle.swingAnim = Math.max(0, s.opponentPaddle.swingAnim - dt * 3.2)
+    this.playerBounceAge = s.playerWindowOpen ? this.playerBounceAge + dt : 0
 
     // 球拍始终跟随输入：得分停顿期间也继续更新，
     // 否则目标会在这段时间里漂移，恢复回合时球拍瞬移一下。
@@ -377,10 +394,31 @@ export class PingPongGame {
     }
 
     // 未挥拍时撞到拍面（被动格挡）
+    const velocityX = s.ball.vel.x
+    const velocityY = s.ball.vel.y
     this.passivePaddleContact('player', events)
 
     // —— 规则判定 ——
     this.checkRules(events)
+    this.updateSoftAlignPrediction(dt, collisions.length > 0 || action.kind === 'hit' ||
+      s.ball.vel.x !== velocityX || s.ball.vel.y !== velocityY)
+  }
+
+  private updateSoftAlignPrediction(dt: number, changed: boolean): void {
+    const s = this.state
+    if (!this.options.softAlign || this.options.autoMove || s.phase !== 'rally' ||
+        s.lastHitter !== 'opponent' || s.ball.vel.z >= -1e-4 ||
+        s.ball.pos.z <= PADDLE.homeZ || s.bounces.opponent > 0 || s.bounces.player > 1) {
+      s.softAlignTargetX = null
+      this.predictionTimer = 0
+      return
+    }
+
+    this.predictionTimer -= dt
+    if (changed || this.predictionTimer <= 0) {
+      s.softAlignTargetX = predictPlayerInterceptX(s.ball, s.playerWindowOpen)
+      this.predictionTimer = 0.05
+    }
   }
 
   /**
@@ -407,17 +445,14 @@ export class PingPongGame {
     if (!this.options.autoMove) {
       const s = this.state
       const b = s.ball
-      if (!this.options.softAlign || s.phase !== 'rally' || !s.playerWindowOpen || s.lastHitter !== 'opponent' ||
-          b.vel.z >= -1e-4 || b.pos.z < PADDLE.homeZ) return this.playerTargetX
+      if (!this.options.softAlign || s.phase !== 'rally' || s.lastHitter !== 'opponent' ||
+          b.vel.z >= -1e-4 || b.pos.z < PADDLE.homeZ || s.softAlignTargetX === null) return this.playerTargetX
 
       const eta = (PADDLE.homeZ - b.pos.z) / b.vel.z
-      if (eta >= 0.6) return this.playerTargetX
-
-      // 落台后 X/Z 同比受阻力衰减，速度比可用于估算穿过拍面的横向位置。
-      const interceptX = b.pos.x + (PADDLE.homeZ - b.pos.z) * b.vel.x / b.vel.z
-      const delta = interceptX - this.playerTargetX
+      const delta = s.softAlignTargetX - this.playerTargetX
       const distanceWeight = Math.max(0, 1 - Math.abs(delta) / 0.4)
-      const timeWeight = clamp((0.6 - eta) / 0.3, 0, 1)
+      const bounceBlend = clamp(this.playerBounceAge / 0.12, 0, 1)
+      const timeWeight = 0.35 + 0.65 * bounceBlend * clamp((0.6 - eta) / 0.3, 0, 1)
       const strength = clamp(this.options.softAlignStrength, 0, 1) * 0.8
       return clamp(this.playerTargetX + delta * distanceWeight * timeWeight * strength, -PADDLE.rangeX, PADDLE.rangeX)
     }
@@ -619,6 +654,9 @@ export class PingPongGame {
     s.bounces = { player: 0, opponent: 0 }
     s.lastHitter = null
     s.playerWindowOpen = false
+    s.softAlignTargetX = null
+    this.predictionTimer = 0
+    this.playerBounceAge = 0
     s.rallyHits = 0
 
     // 重置 AI 的锁定状态，让它重新预判这一次发球

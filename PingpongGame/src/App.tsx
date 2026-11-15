@@ -983,6 +983,11 @@ export default function App() {
     game.options.hitAssist = hitAssist
     game.options.softAlign = softAlign
     game.options.softAlignStrength = softAlignStrength
+    game.refreshSoftAlignPrediction()
+    if (pausedRef.current && rendererRef.current) {
+      rendererRef.current.sync(game.state)
+      rendererRef.current.render()
+    }
   }, [timeScale, autoMove, autoSwing, hitAssist, softAlign, softAlignStrength])
 
   // 显示尺寸实时生效（只动相机，物理完全不受影响）
@@ -1610,7 +1615,7 @@ export default function App() {
                   />
                 </label>
                 <div className="setting-hint">
-                  接近来球位置时轻微引导球拍，仍可自由移动；辅助移动开启时优先自动跟球。
+                  对手击球后，球拍上方的青色圆环标示预测横向位置；接近时轻微引导，落台后逐渐加强。仍需自己移动和挥拍，辅助移动开启时优先自动跟球。
                 </div>
                 <div className="setting">
                   <div className="setting-label">

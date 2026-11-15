@@ -1,4 +1,4 @@
-import { BALL, GRAVITY, PADDLE, TABLE } from './constants.ts'
+import { BALL, FIXED_DT, GRAVITY, PADDLE, TABLE } from './constants.ts'
 import type { Ball, Paddle, Vec3 } from './types.ts'
 import { clamp, distance } from './vec3.ts'
 
@@ -277,6 +277,35 @@ export interface Prediction {
   time: number
   /** 是否真的到达了目标 Z */
   reached: boolean
+}
+
+/** 预测合法来球穿过我方拍面时的横向位置；触网、出界或落台次数不合法则不引导。 */
+export function predictPlayerInterceptX(ball: Ball, alreadyBounced: boolean): number | null {
+  if (ball.vel.z >= 0 || ball.pos.z <= PADDLE.homeZ) return null
+  const sim: Ball = { pos: { ...ball.pos }, vel: { ...ball.vel }, spin: ball.spin }
+  const events: CollisionEvent[] = []
+  let bounced = alreadyBounced
+
+  for (let t = 0; t < 3; t += FIXED_DT) {
+    const previous = { ...sim.pos }
+    events.length = 0
+    stepBall(sim, FIXED_DT, events)
+    for (const event of events) {
+      if (event.kind === 'net' || event.kind === 'floor') return null
+      if (event.kind === 'table') {
+        if (event.side !== 'player' || bounced || event.pos.z <= PADDLE.homeZ) return null
+        bounced = true
+      }
+    }
+    if (Math.abs(sim.pos.x) > OUT_OF_BOUNDS.x || Math.abs(sim.pos.z) > OUT_OF_BOUNDS.z ||
+        sim.pos.y < OUT_OF_BOUNDS.y || sim.vel.z >= 0) return null
+    if (sim.pos.z <= PADDLE.homeZ) {
+      if (!bounced) return null
+      const fraction = (previous.z - PADDLE.homeZ) / (previous.z - sim.pos.z)
+      return previous.x + (sim.pos.x - previous.x) * fraction
+    }
+  }
+  return null
 }
 
 /**

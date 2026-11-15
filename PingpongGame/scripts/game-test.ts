@@ -11,6 +11,8 @@
 
 import { PingPongGame } from '../src/core/game.ts'
 import { FIXED_DT, PADDLE } from '../src/core/constants.ts'
+import { launchTo, predictPlayerInterceptX, stepBall } from '../src/core/physics.ts'
+import type { Ball } from '../src/core/types.ts'
 
 let failures = 0
 function assert(name: string, ok: boolean, detail = ''): void {
@@ -189,7 +191,7 @@ console.log('\n=== 软吸附 ===')
   assert('接近来球时轻微引导（默认强度最多 4.8cm）', soft.x > 0.02 && soft.x <= 0.048001)
   assert('提高强度增加引导但不超过偏差', full.x > soft.x && full.x < 0.2)
   assert('软吸附不会替玩家挥拍', !soft.swung)
-  assert('未落台、球远离或来球尚远时不引导',
+  assert('无效来球、球远离或来球尚远时不引导',
     move({ windowOpen: false }).x === 0 &&
       move({ velocityZ: 2 }).x === 0 &&
       move({ gap: 1.5 }).x === 0)
@@ -203,6 +205,92 @@ console.log('\n=== 软吸附 ===')
     .map((target) => move({ target, strength: 1 }).x)
   assert('玩家持续移动时不会被吸附反向拖拽',
     positions.every((x, index) => index === 0 || x > positions[index - 1]))
+}
+
+console.log('\n=== 提前预测软吸附 ===')
+{
+  const start = { x: 0, y: 0.3, z: PADDLE.opponentZ }
+  const incoming: Ball = { pos: { ...start }, vel: launchTo(start, 0.2, -0.75, 5.2), spin: 0 }
+  const prediction = predictPlayerInterceptX(incoming, false)
+  const simulated: Ball = { pos: { ...incoming.pos }, vel: { ...incoming.vel }, spin: incoming.spin }
+  let afterBounce: Ball | null = null
+  let crossingX: number | null = null
+  for (let i = 0; i < 900 && crossingX === null; i++) {
+    const previous = { ...simulated.pos }
+    const events: Parameters<typeof stepBall>[2] = []
+    stepBall(simulated, FIXED_DT, events)
+    if (events.some((event) => event.kind === 'table' && event.side === 'player')) {
+      afterBounce = { pos: { ...simulated.pos }, vel: { ...simulated.vel }, spin: simulated.spin }
+    }
+    if (simulated.pos.z <= PADDLE.homeZ) {
+      const fraction = (previous.z - PADDLE.homeZ) / (previous.z - simulated.pos.z)
+      crossingX = previous.x + (simulated.pos.x - previous.x) * fraction
+    }
+  }
+  assert('落台前已准确预测过网、反弹后的拍面穿越点',
+    prediction !== null && crossingX !== null && Math.abs(prediction - crossingX) < 1e-9)
+
+  const target = (prediction ?? 0) - 0.2
+  function prepare(ball: Ball, bounced: boolean): PingPongGame {
+    const game = new PingPongGame({ softAlign: true, slowMotion: false, autoHeight: false })
+    game.start()
+    game.state.phase = 'rally'
+    game.state.lastHitter = 'opponent'
+    game.state.bounces = { player: bounced ? 1 : 0, opponent: 0 }
+    game.state.playerWindowOpen = bounced
+    game.state.ball = { pos: { ...ball.pos }, vel: { ...ball.vel }, spin: ball.spin }
+    game.state.playerPaddle.x = target
+    game.setPlayerTarget(target)
+    return game
+  }
+
+  const early = prepare(incoming, false)
+  let swung = false
+  for (let i = 0; i < 18; i++) {
+    const events = early.step(FIXED_DT)
+    if (events.some((event) => event.type === 'swing')) swung = true
+  }
+  const earlyOffset = early.state.playerPaddle.x - target
+  assert('对手击球后、我方落台前显示预测并轻柔引导',
+    !early.state.playerWindowOpen && early.state.softAlignTargetX !== null && earlyOffset > 0 && !swung)
+  if (afterBounce) {
+    const late = prepare(afterBounce, true)
+    for (let i = 0; i < 3; i++) late.step(FIXED_DT)
+    const initialOffset = late.state.playerPaddle.x - target
+    for (let i = 0; i < 15; i++) late.step(FIXED_DT)
+    assert('落台时引导平滑过渡，没有立即跳到最大强度',
+      initialOffset > 0 && initialOffset < late.state.playerPaddle.x - target)
+    assert('落台后引导逐渐加强', late.state.playerPaddle.x - target > earlyOffset)
+  } else {
+    assert('落台时引导平滑过渡，没有立即跳到最大强度', false, '测试轨迹未落台')
+    assert('落台后引导逐渐加强', false, '测试轨迹未落台')
+  }
+
+  const net: Ball = { pos: { x: 0, y: 0.1, z: 0.1 }, vel: { x: 0, y: -1, z: -3 }, spin: 0 }
+  const out: Ball = { pos: { x: 1, y: 0.3, z: 1.28 }, vel: { x: 0, y: 1, z: -5 }, spin: 0 }
+  const secondBounce: Ball = { pos: { x: 0, y: 0.05, z: -0.4 }, vel: { x: 0, y: -1, z: -1 }, spin: 0 }
+  assert('预测触网、出界及第二次落台时不引导',
+    predictPlayerInterceptX(net, false) === null && predictPlayerInterceptX(out, false) === null &&
+      predictPlayerInterceptX(secondBounce, true) === null)
+
+  early.state.ball = { pos: { x: 0, y: 0.1, z: 0.004 }, vel: { x: 0, y: -1, z: -3 }, spin: 0 }
+  early.step(FIXED_DT)
+  assert('实际触网立即移除预测标记', early.state.softAlignTargetX === null)
+  early.state.ball = { pos: { ...incoming.pos }, vel: { ...incoming.vel }, spin: incoming.spin }
+  early.refreshSoftAlignPrediction()
+  early.options.autoMove = true
+  early.refreshSoftAlignPrediction()
+  assert('辅助移动开启时隐藏预测标记', early.state.softAlignTargetX === null)
+  early.options.autoMove = false
+  early.refreshSoftAlignPrediction()
+  assert('关闭辅助移动后立即恢复预测', early.state.softAlignTargetX !== null)
+  early.options.softAlign = false
+  early.refreshSoftAlignPrediction()
+  assert('关闭软吸附时立即隐藏预测标记', early.state.softAlignTargetX === null)
+  early.options.softAlign = true
+  early.state.lastHitter = null
+  early.refreshSoftAlignPrediction()
+  assert('对手尚未击球时不显示预测', early.state.softAlignTargetX === null)
 }
 
 // ---------------------------------------------------------------- 1. 停顿不锁死
