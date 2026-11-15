@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { PingPongGame } from './core/game.ts'
 import { AI_PRESETS, PLAYER, TARGET_SCORE } from './core/constants.ts'
 import type { Phase, Side } from './core/types.ts'
@@ -108,6 +108,50 @@ const INITIAL_HUD: HudState = {
   gameOver: null,
 }
 
+/**
+ * 带"已选部分"色条的滑块。
+ *
+ * 原生 range 的轨道是一条死板的灰线，看不出当前值在区间里的位置；
+ * 这里用 --fill 把已选中的那一段涂成主色，一眼就有数。
+ *
+ * 双击滑块可以恢复默认值（很多视频编辑器/设计工具都这么用）。
+ */
+function Slider({
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  defaultValue,
+  title,
+}: {
+  min: number
+  max: number
+  step: number
+  value: number
+  onChange: (v: number) => void
+  /** 传了就允许双击恢复到这个值 */
+  defaultValue?: number
+  title?: string
+}) {
+  const pct = max > min ? ((value - min) / (max - min)) * 100 : 0
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      title={title ?? (defaultValue !== undefined ? '双击恢复默认' : undefined)}
+      style={{ '--fill': `${Math.max(0, Math.min(100, pct))}%` } as CSSProperties}
+      onChange={(e) => onChange(Number(e.target.value))}
+      onDoubleClick={() => {
+        if (defaultValue !== undefined) onChange(defaultValue)
+      }}
+    />
+  )
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>('menu')
   const [inputMode, setInputMode] = useState<InputMode>('keyboard')
@@ -115,6 +159,8 @@ export default function App() {
   const [swingThreshold, setSwingThreshold] = useState<number>(PLAYER.swingThreshold)
   const [slowMotion, setSlowMotion] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
+  /** 左上角状态面板是否展开（折叠起来只剩一行，游戏时更清爽） */
+  const [showStatus, setShowStatus] = useState(true)
   const [showPoseOverlay, setShowPoseOverlay] = useState(true)
   const [timeScale, setTimeScale] = useState<number>(NORMAL_DEFAULT_TIME_SCALE)
   const [autoMove, setAutoMove] = useState(false)
@@ -143,9 +189,18 @@ export default function App() {
   const [bootError, setBootError] = useState<string | null>(null)
   const [booting, setBooting] = useState(false)
 
+  /**
+   * 比分变化计数：谁的分数变了就把那一侧的 key 换掉，
+   * 元素被重新挂载，CSS 动画自动重播一次（数字"弹一下"）。
+   */
+  const [scoreBump, setScoreBump] = useState({ player: 0, opponent: 0 })
+  const prevScoreRef = useRef({ player: 0, opponent: 0 })
+
   const containerRef = useRef<HTMLDivElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
+  /** 结算页的「再来一局」按钮：结算后自动聚焦，回车直接能重开 */
+  const restartBtnRef = useRef<HTMLButtonElement>(null)
 
   const gameRef = useRef<PingPongGame | null>(null)
   const rendererRef = useRef<GameRenderer | null>(null)
@@ -688,6 +743,64 @@ export default function App() {
     game.options.slowMotion = slowMotion
   }, [difficulty, slowMotion])
 
+  // 比分变了就重播一次数字动画
+  useEffect(() => {
+    const prev = prevScoreRef.current
+    const next = hud.score
+    if (next.player !== prev.player) {
+      setScoreBump((s) => ({ ...s, player: s.player + 1 }))
+    }
+    if (next.opponent !== prev.opponent) {
+      setScoreBump((s) => ({ ...s, opponent: s.opponent + 1 }))
+    }
+    prevScoreRef.current = { ...next }
+  }, [hud.score])
+
+  // 结算后把焦点放到「再来一局」上：回车直接重开，键盘用户不用再 Tab 一次
+  useEffect(() => {
+    if (hud.gameOver) restartBtnRef.current?.focus()
+  }, [hud.gameOver])
+
+  /**
+   * 全局快捷键 + 点面板外关闭设置：
+   * - Esc：先关掉设置面板；结算页再按 Esc 回主菜单
+   * - Enter：结算页「再来一局」；主菜单「开始游戏」
+   * - 鼠标点设置面板以外的地方，面板自动收起
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      // 焦点在按钮/滑块里时，回车交给控件自己处理，避免重复触发
+      const inControl = !!target?.closest?.('button, input, select, textarea')
+      if (e.key === 'Escape') {
+        if (showSettings) setShowSettings(false)
+        else if (hud.gameOver) backToMenu()
+        return
+      }
+      if (e.key !== 'Enter' || inControl) return
+      if (hud.gameOver) {
+        e.preventDefault()
+        restartGame()
+      } else if (screen === 'menu') {
+        e.preventDefault()
+        void startGame()
+      }
+    }
+    const onPointerDown = (e: MouseEvent) => {
+      if (!showSettings) return
+      const target = e.target as HTMLElement | null
+      // 点面板内部或齿轮按钮都不关
+      if (target?.closest?.('.settings, .settings-toggle')) return
+      setShowSettings(false)
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('mousedown', onPointerDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mousedown', onPointerDown)
+    }
+  }, [showSettings, hud.gameOver, screen, backToMenu, restartGame, startGame])
+
   // 音效开关 / 音量实时生效
   useEffect(() => {
     const sound = ensureSound()
@@ -871,20 +984,31 @@ export default function App() {
 
       {screen === 'playing' && (
         <div className="hud">
-          <div className="scoreboard">
+          <div className="scoreboard glass">
             <div className="score-side player">
               <span className="score-label">你</span>
-              <span className="score-value">{hud.score.player}</span>
+              {/* key 变了元素就会重新挂载，CSS 动画自动重播 */}
+              <span
+                key={`p${scoreBump.player}`}
+                className={`score-value ${scoreBump.player ? 'bump' : ''}`}
+              >
+                {hud.score.player}
+              </span>
             </div>
             <span className="score-sep">:</span>
             <div className="score-side opponent">
               <span className="score-label">对手</span>
-              <span className="score-value">{hud.score.opponent}</span>
+              <span
+                key={`o${scoreBump.opponent}`}
+                className={`score-value ${scoreBump.opponent ? 'bump' : ''}`}
+              >
+                {hud.score.opponent}
+              </span>
             </div>
           </div>
 
-          <div className="status-panel">
-            <div className="status-row">
+          <div className="status-panel glass">
+            <div className="status-head">
               <span>
                 <i className={`dot ${hud.cameraState === 'ready' ? 'ok' : 'warn'}`} />
                 {inputMode === 'pose'
@@ -894,88 +1018,99 @@ export default function App() {
                   : inputMode === 'mouse'
                     ? '鼠标模式'
                     : '键盘模式'}
+                <b className="status-fps">{hud.fps} fps</b>
               </span>
+              <button
+                className={`collapse-btn ${showStatus ? '' : 'collapsed'}`}
+                onClick={() => setShowStatus((v) => !v)}
+                aria-expanded={showStatus}
+                title={showStatus ? '收起详情' : '展开详情'}
+              >
+                <span className="chev">▾</span>
+                详情
+              </button>
             </div>
-            {inputMode === 'pose' && (
-              <>
-                <div className="status-row">
-                  <span>体感识别人</span>
-                  <b>{hud.hasPerson ? '是' : '否'}</b>
-                </div>
-                <div className="status-row">
-                  <span>身体位置</span>
-                  <b>{hud.bodyPos.toFixed(2)}</b>
-                </div>
-                <div className="status-row">
-                  <span>挥拍手</span>
-                  <b>
-                    {swingSource === 'left'
-                      ? '左手'
-                      : swingSource === 'right'
-                        ? '右手'
-                        : swingSource === 'mouse'
+
+            {showStatus && (
+              <div className="status-body">
+                {inputMode === 'pose' && (
+                  <>
+                    <div className="status-row">
+                      <span>体感识别人</span>
+                      <b>{hud.hasPerson ? '是' : '否'}</b>
+                    </div>
+                    <div className="status-row">
+                      <span>身体位置</span>
+                      <b>{hud.bodyPos.toFixed(2)}</b>
+                    </div>
+                    <div className="status-row">
+                      <span>挥拍手</span>
+                      <b>
+                        {swingSource === 'left'
+                          ? '左手'
+                          : swingSource === 'right'
+                            ? '右手'
+                            : swingSource === 'mouse'
+                              ? '鼠标左键'
+                              : '双手'}
+                      </b>
+                    </div>
+                    <div className="status-row">
+                      <span>采样点</span>
+                      <b className={hud.armSeen || isMouseSwing(swingSource) ? '' : 'bad'}>
+                        {isMouseSwing(swingSource)
                           ? '鼠标左键'
-                          : '双手'}
-                  </b>
-                </div>
-                <div className="status-row">
-                  <span>采样点</span>
-                  <b className={hud.armSeen || isMouseSwing(swingSource) ? '' : 'bad'}>
-                    {isMouseSwing(swingSource)
-                      ? '鼠标左键'
-                      : hud.armSource === 'wrist'
-                        ? '手腕'
-                        : hud.armSource === 'elbow'
-                          ? '肘部（兜底）'
-                          : '无'}
-                  </b>
-                </div>
-                <div className="status-row">
-                  <span>挥拍速度</span>
-                  <b className={hud.swingSpeed >= effSwingThreshold ? 'hot' : ''}>
-                    {hud.swingSpeed.toFixed(2)} / {effSwingThreshold.toFixed(2)}
-                  </b>
-                </div>
-                <div className="status-row">
-                  <span>垂直位移</span>
-                  <b className={hud.swingVert >= effVertThreshold ? 'hot' : ''}>
-                    {hud.swingVert.toFixed(3)} / {effVertThreshold.toFixed(3)}
-                  </b>
-                </div>
-                <div className="status-note">
-                  {isMouseSwing(swingSource) ? (
-                    <>
-                      现在用鼠标左键击球：球拍位置 = 你在画面里的位置（零点 = 画面正中）。
-                      下面的手腕数值只是参考，不参与判定。
-                    </>
-                  ) : (
-                    <>
-                      速度或垂直位移超线即算挥拍（单位：肩宽，手腕每帧的移动量）。
-                      球拍位置 = 你在画面里的位置（零点 = 画面正中）。
-                      手腕没识别到时会自动改用肘部，阈值相应放宽。
-                    </>
-                  )}
-                </div>
-                {hud.cameraError && (
-                  <div className="status-error">{hud.cameraError}</div>
+                          : hud.armSource === 'wrist'
+                            ? '手腕'
+                            : hud.armSource === 'elbow'
+                              ? '肘部（兜底）'
+                              : '无'}
+                      </b>
+                    </div>
+                    <div className="status-row">
+                      <span>挥拍速度</span>
+                      <b className={hud.swingSpeed >= effSwingThreshold ? 'hot' : ''}>
+                        {hud.swingSpeed.toFixed(2)} / {effSwingThreshold.toFixed(2)}
+                      </b>
+                    </div>
+                    <div className="status-row">
+                      <span>垂直位移</span>
+                      <b className={hud.swingVert >= effVertThreshold ? 'hot' : ''}>
+                        {hud.swingVert.toFixed(3)} / {effVertThreshold.toFixed(3)}
+                      </b>
+                    </div>
+                    <div className="status-note">
+                      {isMouseSwing(swingSource) ? (
+                        <>
+                          现在用鼠标左键击球：球拍位置 = 你在画面里的位置（零点 = 画面正中）。
+                          下面的手腕数值只是参考，不参与判定。
+                        </>
+                      ) : (
+                        <>
+                          速度或垂直位移超线即算挥拍（单位：肩宽，手腕每帧的移动量）。
+                          球拍位置 = 你在画面里的位置（零点 = 画面正中）。
+                          手腕没识别到时会自动改用肘部，阈值相应放宽。
+                        </>
+                      )}
+                    </div>
+                    {hud.cameraError && (
+                      <div className="status-error">{hud.cameraError}</div>
+                    )}
+                    {hud.cameraState === 'loading' && (
+                      <div className="status-error">正在加载姿态模型…</div>
+                    )}
+                  </>
                 )}
-                {hud.cameraState === 'loading' && (
-                  <div className="status-error">正在加载姿态模型…</div>
-                )}
-              </>
+                <div className="status-row">
+                  <span>时间倍率</span>
+                  <b>{hud.timeScale.toFixed(2)}x</b>
+                </div>
+                <div className="status-row">
+                  <span>目标分数</span>
+                  <b>{TARGET_SCORE} 分</b>
+                </div>
+              </div>
             )}
-            <div className="status-row">
-              <span>帧率</span>
-              <b>{hud.fps} fps</b>
-            </div>
-            <div className="status-row">
-              <span>时间倍率</span>
-              <b>{hud.timeScale.toFixed(2)}x</b>
-            </div>
-            <div className="status-row">
-              <span>目标分数</span>
-              <b>{TARGET_SCORE} 分</b>
-            </div>
           </div>
 
           {prompt && (
@@ -985,7 +1120,7 @@ export default function App() {
             </div>
           )}
 
-          <div className="camera-preview">
+          <div className={`camera-preview ${inputMode !== 'pose' ? 'compact' : ''}`}>
             <div ref={previewRef} style={{ position: 'absolute', inset: 0 }} />
             <canvas ref={overlayRef} style={{ position: 'absolute', inset: 0 }} />
             {inputMode !== 'pose' && (
@@ -994,11 +1129,11 @@ export default function App() {
             <div className="camera-caption">
               {inputMode === 'pose'
                 ? '虚线框=人体识别范围，橙色=手腕。挥拍看的是手腕的相对位移'
-                : '体感模式这里显示摄像头画面与人体辅助框'}
+                : '体感模式可在这里看到摄像头画面与人体辅助框'}
             </div>
           </div>
 
-          <div className="hints">
+          <div className="hints glass">
             {inputMode === 'pose' ? (
               <>左右移动身体调整球拍 · 上下快速挥动手腕击球</>
             ) : inputMode === 'mouse' ? (
@@ -1011,247 +1146,273 @@ export default function App() {
             )}
           </div>
 
-          <button className="settings-toggle" onClick={() => setShowSettings((v) => !v)}>
+          <button
+            className={`settings-toggle ${showSettings ? 'active' : ''}`}
+            onClick={() => setShowSettings((v) => !v)}
+            aria-label="设置"
+            title="设置（Esc 关闭）"
+          >
             ⚙
           </button>
 
           {showSettings && (
-            <div className="settings">
+            <div className="settings glass" role="dialog" aria-label="设置">
               <h3>设置</h3>
 
-              <div className="setting">
-                <div className="setting-label">
-                  <span>操作方式</span>
-                </div>
-                <div className="seg">
-                  <button
-                    className={inputMode === 'pose' ? 'active' : ''}
-                    onClick={() => switchInputMode('pose')}
-                  >
-                    体感
-                  </button>
-                  <button
-                    className={inputMode === 'mouse' ? 'active' : ''}
-                    onClick={() => switchInputMode('mouse')}
-                  >
-                    鼠标
-                  </button>
-                  <button
-                    className={inputMode === 'keyboard' ? 'active' : ''}
-                    onClick={() => switchInputMode('keyboard')}
-                  >
-                    键盘
-                  </button>
-                </div>
-              </div>
+              <div className="setting-group">
+                <div className="setting-group-title">操作</div>
 
-              {inputMode === 'pose' && (
-                <>
-                  <label className="setting switch">
-                    <span>人体辅助框</span>
-                    <input
-                      type="checkbox"
-                      checked={showPoseOverlay}
-                      onChange={(e) => setShowPoseOverlay(e.target.checked)}
-                    />
-                  </label>
-                  {poseOptions}
-                </>
-              )}
-
-              <div className="setting">
-                <div className="setting-label">
-                  <span>对手强度</span>
-                </div>
-                <div className="seg">
-                  {(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => (
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>操作方式</span>
+                  </div>
+                  <div className="seg">
                     <button
-                      key={d}
-                      className={difficulty === d ? 'active' : ''}
-                      onClick={() => setDifficulty(d)}
+                      className={inputMode === 'pose' ? 'active' : ''}
+                      onClick={() => switchInputMode('pose')}
                     >
-                      {d === 'easy' ? '简单' : d === 'normal' ? '普通' : '困难'}
+                      体感
                     </button>
-                  ))}
+                    <button
+                      className={inputMode === 'mouse' ? 'active' : ''}
+                      onClick={() => switchInputMode('mouse')}
+                    >
+                      鼠标
+                    </button>
+                    <button
+                      className={inputMode === 'keyboard' ? 'active' : ''}
+                      onClick={() => switchInputMode('keyboard')}
+                    >
+                      键盘
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="setting">
-                <div className="setting-label">
-                  <span>挥拍灵敏度</span>
-                  <b>{swingThreshold.toFixed(2)}</b>
-                </div>
-                <input
-                  type="range"
-                  min={0.8}
-                  max={8}
-                  step={0.1}
-                  value={swingThreshold}
-                  onChange={(e) => setSwingThreshold(Number(e.target.value))}
-                />
-                <div className="setting-hint">
-                  数值越小越容易挥拍。速度阈值 {swingThreshold.toFixed(2)} 肩宽/秒，
-                  垂直位移阈值 {verticalThresholdOf(swingThreshold).toFixed(2)} 肩宽。
-                  一直挥不出来就调到 1.5 以下。
-                </div>
-              </div>
-
-              <div className="setting">
-                <div className="setting-label">
-                  <span>球速</span>
-                  <b>{timeScale.toFixed(2)}x</b>
-                </div>
-                <input
-                  type="range"
-                  min={0.3}
-                  max={1.2}
-                  step={0.05}
-                  value={timeScale}
-                  onChange={(e) => {
-                    speedTouchedRef.current = true
-                    setTimeScale(Number(e.target.value))
-                  }}
-                />
-                <div className="setting-hint">
-                  相当于慢动作：弹道不变，只是整个比赛变慢，给你更多反应时间。
-                  0.5 就是两倍慢动作，1.2 是两成快节奏。体感模式建议 0.8 左右。
-                </div>
-              </div>
-
-              <div className="setting">
-                <div className="setting-label">
-                  <span>球台显示尺寸</span>
-                  <b>{displaySize.toFixed(2)}x</b>
-                </div>
-                <input
-                  type="range"
-                  min={VIEW.minDisplaySize}
-                  max={VIEW.maxDisplaySize}
-                  step={0.05}
-                  value={displaySize}
-                  onChange={(e) => setDisplaySize(Number(e.target.value))}
-                />
-                <div className="setting-hint">
-                  相机不动、透视不变，只是把画面裁一块出来重新铺满屏幕。
-                  1.0 是原样：往上调画面放大（球台、球、球拍一起变大，裁掉的是上方空背景），
-                  往下调画面缩小、露出更多场景。放到 3.0 就只剩我方这半张台面了。
-                </div>
-              </div>
-
-              <div className="setting">
-                <div className="setting-label">
-                  <span>相机位姿</span>
-                  <button
-                    className="mini-btn"
-                    onClick={() => setCameraPose({ ...DEFAULT_CAMERA })}
-                  >
-                    恢复默认
-                  </button>
-                </div>
-                {cameraSliders.map((row) => {
-                  const limit = CAMERA_LIMITS[row.key]
-                  return (
-                    <div key={row.key} className="camera-slider">
-                      <div className="setting-label">
-                        <span>{row.label}</span>
-                        <b>
-                          {cameraPose[row.key].toFixed(row.digits)}
-                          {row.unit}
-                        </b>
-                      </div>
+                {inputMode === 'pose' && (
+                  <>
+                    <label className="setting switch">
+                      <span>人体辅助框</span>
                       <input
-                        type="range"
-                        min={limit.min}
-                        max={limit.max}
-                        step={limit.step}
-                        value={cameraPose[row.key]}
-                        onChange={(e) =>
-                          setCameraPose({ ...cameraPose, [row.key]: Number(e.target.value) })
-                        }
+                        type="checkbox"
+                        checked={showPoseOverlay}
+                        onChange={(e) => setShowPoseOverlay(e.target.checked)}
                       />
-                    </div>
-                  )
-                })}
-                <div className="setting-hint">
-                  相机位置和俯角可以手动调（范围有限，不会跑飞）。
-                  左右是横向平移，俯角决定往下看多少度——这两条和「球台显示尺寸」
-                  完全独立：调显示尺寸永远只是裁剪放大，不会把视角变成俯视。
+                    </label>
+                    {poseOptions}
+                  </>
+                )}
+
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>对手强度</span>
+                  </div>
+                  <div className="seg">
+                    {(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => (
+                      <button
+                        key={d}
+                        className={difficulty === d ? 'active' : ''}
+                        onClick={() => setDifficulty(d)}
+                      >
+                        {d === 'easy' ? '简单' : d === 'normal' ? '普通' : '困难'}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="setting">
-                <div className="setting-label">
-                  <span>画面检查</span>
-                  <b className={frameStatus.cls}>{frameStatus.text}</b>
+              <div className="setting-group">
+                <div className="setting-group-title">手感</div>
+
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>挥拍灵敏度</span>
+                    <b>{swingThreshold.toFixed(2)}</b>
+                  </div>
+                  <Slider
+                    min={0.8}
+                    max={8}
+                    step={0.1}
+                    value={swingThreshold}
+                    defaultValue={PLAYER.swingThreshold}
+                    onChange={setSwingThreshold}
+                  />
+                  <div className="setting-hint">
+                    数值越小越容易挥拍。速度阈值 {swingThreshold.toFixed(2)} 肩宽/秒，
+                    垂直位移阈值 {verticalThresholdOf(swingThreshold).toFixed(2)} 肩宽。
+                    一直挥不出来就调到 1.5 以下。
+                  </div>
                 </div>
-                <div className="setting-hint">
-                  球拍横向 {frameCheck.paddleX.toFixed(2)}（≤1 在画面内）·
-                  球拍纵向 {frameCheck.paddleCenter.toFixed(2)}（
-                  {frameCheck.paddleBottom.toFixed(2)} ~ {frameCheck.paddleTop.toFixed(2)}）·
-                  对手头顶 {frameCheck.opponentHead.toFixed(2)}
-                  {!frameCheck.paddleOk &&
-                    (frameCheck.cameraOk
-                      ? ' —— 球拍被放大裁掉了。'
-                      : ' —— 球拍出画了，往回调一点。')}
-                  {!frameCheck.opponentOk &&
-                    (frameCheck.cameraOk
-                      ? ' —— 对手被放大裁掉了。'
-                      : ' —— 对手出画了，往回调一点。')}
+
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>球速</span>
+                    <b>{timeScale.toFixed(2)}x</b>
+                  </div>
+                  <Slider
+                    min={0.3}
+                    max={1.2}
+                    step={0.05}
+                    value={timeScale}
+                    defaultValue={
+                      inputMode === 'pose' ? POSE_DEFAULT_TIME_SCALE : NORMAL_DEFAULT_TIME_SCALE
+                    }
+                    onChange={(v) => {
+                      speedTouchedRef.current = true
+                      setTimeScale(v)
+                    }}
+                  />
+                  <div className="setting-hint">
+                    相当于慢动作：弹道不变，只是整个比赛变慢，给你更多反应时间。
+                    0.5 就是两倍慢动作，1.2 是两成快节奏。体感模式建议 0.8 左右。
+                  </div>
                 </div>
               </div>
 
-              <label className="setting switch">
-                <span>辅助移动</span>
-                <input
-                  type="checkbox"
-                  checked={autoMove}
-                  onChange={(e) => setAutoMove(e.target.checked)}
-                />
-              </label>
-              <div className="setting-hint">球拍自动跟着球走，你只管挥拍。</div>
+              <div className="setting-group">
+                <div className="setting-group-title">画面</div>
 
-              <label className="setting switch">
-                <span>辅助击球</span>
-                <input
-                  type="checkbox"
-                  checked={autoSwing}
-                  onChange={(e) => setAutoSwing(e.target.checked)}
-                />
-              </label>
-              <div className="setting-hint">球进到拍区自动挥拍，你只管走位。</div>
-
-              <label className="setting switch">
-                <span>慢动作辅助</span>
-                <input
-                  type="checkbox"
-                  checked={slowMotion}
-                  onChange={(e) => setSlowMotion(e.target.checked)}
-                />
-              </label>
-
-              <label className="setting switch">
-                <span>音效</span>
-                <input
-                  type="checkbox"
-                  checked={soundOn}
-                  onChange={(e) => setSoundOn(e.target.checked)}
-                />
-              </label>
-              <div className="setting-hint">击球、落台、触网、得分的声音都是实时合成的。</div>
-
-              <div className="setting">
-                <div className="setting-label">
-                  <span>音量</span>
-                  <b>{Math.round(soundVolume * 100)}%</b>
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>球台显示尺寸</span>
+                    <b>{displaySize.toFixed(2)}x</b>
+                  </div>
+                  <Slider
+                    min={VIEW.minDisplaySize}
+                    max={VIEW.maxDisplaySize}
+                    step={0.05}
+                    value={displaySize}
+                    defaultValue={1}
+                    onChange={setDisplaySize}
+                  />
+                  <div className="setting-hint">
+                    相机不动、透视不变，只是把画面裁一块出来重新铺满屏幕。
+                    1.0 是原样：往上调画面放大（球台、球、球拍一起变大，裁掉的是上方空背景），
+                    往下调画面缩小、露出更多场景。放到 3.0 就只剩我方这半张台面了。
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={soundVolume}
-                  onChange={(e) => setSoundVolume(Number(e.target.value))}
-                />
+
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>相机位姿</span>
+                    <button
+                      className="mini-btn"
+                      onClick={() => setCameraPose({ ...DEFAULT_CAMERA })}
+                      title="恢复最初的取景"
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+                  {cameraSliders.map((row) => {
+                    const limit = CAMERA_LIMITS[row.key]
+                    return (
+                      <div key={row.key} className="camera-slider">
+                        <div className="setting-label">
+                          <span>{row.label}</span>
+                          <b>
+                            {cameraPose[row.key].toFixed(row.digits)}
+                            {row.unit}
+                          </b>
+                        </div>
+                        <Slider
+                          min={limit.min}
+                          max={limit.max}
+                          step={limit.step}
+                          value={cameraPose[row.key]}
+                          defaultValue={DEFAULT_CAMERA[row.key]}
+                          onChange={(v) => setCameraPose({ ...cameraPose, [row.key]: v })}
+                        />
+                      </div>
+                    )
+                  })}
+                  <div className="setting-hint">
+                    相机位置和俯角可以手动调（范围有限，不会跑飞）。
+                    左右是横向平移，俯角决定往下看多少度——这两条和「球台显示尺寸」
+                    完全独立：调显示尺寸永远只是裁剪放大，不会把视角变成俯视。
+                  </div>
+                </div>
+
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>画面检查</span>
+                    <b className={frameStatus.cls}>{frameStatus.text}</b>
+                  </div>
+                  <div className="setting-hint">
+                    球拍横向 {frameCheck.paddleX.toFixed(2)}（≤1 在画面内）·
+                    球拍纵向 {frameCheck.paddleCenter.toFixed(2)}（
+                    {frameCheck.paddleBottom.toFixed(2)} ~ {frameCheck.paddleTop.toFixed(2)}）·
+                    对手头顶 {frameCheck.opponentHead.toFixed(2)}
+                    {!frameCheck.paddleOk &&
+                      (frameCheck.cameraOk
+                        ? ' —— 球拍被放大裁掉了。'
+                        : ' —— 球拍出画了，往回调一点。')}
+                    {!frameCheck.opponentOk &&
+                      (frameCheck.cameraOk
+                        ? ' —— 对手被放大裁掉了。'
+                        : ' —— 对手出画了，往回调一点。')}
+                  </div>
+                </div>
+              </div>
+
+              <div className="setting-group">
+                <div className="setting-group-title">辅助</div>
+
+                <label className="setting switch">
+                  <span>辅助移动</span>
+                  <input
+                    type="checkbox"
+                    checked={autoMove}
+                    onChange={(e) => setAutoMove(e.target.checked)}
+                  />
+                </label>
+                <div className="setting-hint">球拍自动跟着球走，你只管挥拍。</div>
+
+                <label className="setting switch">
+                  <span>辅助击球</span>
+                  <input
+                    type="checkbox"
+                    checked={autoSwing}
+                    onChange={(e) => setAutoSwing(e.target.checked)}
+                  />
+                </label>
+                <div className="setting-hint">球进到拍区自动挥拍，你只管走位。</div>
+
+                <label className="setting switch">
+                  <span>慢动作辅助</span>
+                  <input
+                    type="checkbox"
+                    checked={slowMotion}
+                    onChange={(e) => setSlowMotion(e.target.checked)}
+                  />
+                </label>
+              </div>
+
+              <div className="setting-group">
+                <div className="setting-group-title">声音</div>
+
+                <label className="setting switch">
+                  <span>音效</span>
+                  <input
+                    type="checkbox"
+                    checked={soundOn}
+                    onChange={(e) => setSoundOn(e.target.checked)}
+                  />
+                </label>
+                <div className="setting-hint">击球、落台、触网、得分的声音都是实时合成的。</div>
+
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>音量</span>
+                    <b>{Math.round(soundVolume * 100)}%</b>
+                  </div>
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={soundVolume}
+                    defaultValue={0.65}
+                    onChange={setSoundVolume}
+                  />
+                </div>
               </div>
 
               <button
@@ -1270,7 +1431,11 @@ export default function App() {
           {hud.gameOver && (
             <div className="gameover">
               <div className="gameover-card">
-                <div className="gameover-title">
+                <div
+                  className={`gameover-title ${
+                    hud.gameOver.winner === 'player' ? 'win' : 'lose'
+                  }`}
+                >
                   {hud.gameOver.winner === 'player' ? '你赢了！' : '你输了'}
                 </div>
                 <div className="gameover-score">
@@ -1281,11 +1446,11 @@ export default function App() {
                 <div className="gameover-hint">
                   {hud.gameOver.winner === 'player' ? '打得不错' : '再来一局？'}
                 </div>
-                <button className="start-btn" onClick={restartGame}>
-                  再来一局
+                <button className="start-btn" ref={restartBtnRef} onClick={restartGame}>
+                  再来一局 <kbd>Enter</kbd>
                 </button>
                 <button className="ghost-btn" onClick={backToMenu}>
-                  返回主菜单
+                  返回主菜单 <kbd>Esc</kbd>
                 </button>
               </div>
             </div>
@@ -1295,59 +1460,86 @@ export default function App() {
 
       {screen === 'menu' && (
         <div className="start-overlay">
-          <h1 className="start-title">PingpongGame</h1>
-          <p className="start-sub">
-            3D 体感乒乓球。体感模式用摄像头捕捉你的身体：左右移动调整球拍位置，
-            在球落到你这边台面后快速挥动手腕完成击球。
-            <br />
-            惯用左手可以在下面选「左手」；不想挥手腕就选「鼠标左键」
-            （球拍仍然跟着身体走，击球用鼠标左键）。
-            <br />
-            没有摄像头也可以用鼠标（移动鼠标 + 点击）或键盘（← → + 空格）来玩。
-          </p>
+          <div className="menu-card">
+            <h1 className="start-title">
+              PingPong 3D
+              <small>体感乒乓球</small>
+            </h1>
+            <p className="start-sub">
+              摄像头捕捉你的身体：左右移动调整球拍位置，
+              球落到你这边台面后快速挥动手腕完成击球。
+            </p>
 
-          <div className="flow">
-            <span className="flow-step">对手发球</span>
-            <span className="flow-arrow">→</span>
-            <span className="flow-step">球在对方区弹一次</span>
-            <span className="flow-arrow">→</span>
-            <span className="flow-step">球在我方区弹一次</span>
-            <span className="flow-arrow">→</span>
-            <span className="flow-step">你挥拍回击</span>
+            <div className="mode-grid">
+              <button
+                className={`mode-card ${inputMode === 'pose' ? 'active' : ''}`}
+                onClick={() => switchInputMode('pose')}
+                aria-pressed={inputMode === 'pose'}
+              >
+                <span className="mode-icon">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="2" y="6" width="13" height="10" rx="2.5" />
+                    <path d="M15 10.5 21.5 7v8L15 11.5z" />
+                  </svg>
+                </span>
+                <span className="mode-name">体感</span>
+                <span className="mode-desc">摄像头捕捉身体 · 挥腕击球</span>
+              </button>
+
+              <button
+                className={`mode-card ${inputMode === 'mouse' ? 'active' : ''}`}
+                onClick={() => switchInputMode('mouse')}
+                aria-pressed={inputMode === 'mouse'}
+              >
+                <span className="mode-icon">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="7" y="2.5" width="10" height="19" rx="5" />
+                    <path d="M12 7v3.5" />
+                  </svg>
+                </span>
+                <span className="mode-name">鼠标</span>
+                <span className="mode-desc">移动鼠标走位 · 左键挥拍</span>
+              </button>
+
+              <button
+                className={`mode-card ${inputMode === 'keyboard' ? 'active' : ''}`}
+                onClick={() => switchInputMode('keyboard')}
+                aria-pressed={inputMode === 'keyboard'}
+              >
+                <span className="mode-icon">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="1.5" y="6" width="21" height="12" rx="2.5" />
+                    <path d="M5.5 10h.01M9 10h.01M12.5 10h.01M16 10h.01M19.5 10h.01M8 14h8" />
+                  </svg>
+                </span>
+                <span className="mode-name">键盘</span>
+                <span className="mode-desc">← → 移动 · 空格挥拍</span>
+              </button>
+            </div>
+
+            {inputMode === 'pose' && <div className="menu-options">{poseOptions}</div>}
+
+            <div className="flow">
+              <span className="flow-step">对手发球</span>
+              <span className="flow-arrow">→</span>
+              <span className="flow-step">对方区弹一次</span>
+              <span className="flow-arrow">→</span>
+              <span className="flow-step">我方区弹一次</span>
+              <span className="flow-arrow">→</span>
+              <span className="flow-step">你挥拍回击</span>
+            </div>
+
+            {bootError && <div className="start-error">{bootError}</div>}
+
+            <button className="start-btn" onClick={startGame} disabled={booting}>
+              {booting ? '正在加载姿态模型…' : '开始游戏'}
+            </button>
+
+            <p className="start-footnote">
+              体感模式首次启动需要从 CDN 下载 MediaPipe 的 wasm 与姿态模型（约 10MB），请保持联网。
+              没有摄像头也能玩：鼠标或键盘模式不需要任何权限。
+            </p>
           </div>
-
-          <div className="seg" style={{ width: 420, maxWidth: '92%' }}>
-            <button
-              className={inputMode === 'pose' ? 'active' : ''}
-              onClick={() => switchInputMode('pose')}
-            >
-              体感模式（需摄像头）
-            </button>
-            <button
-              className={inputMode === 'mouse' ? 'active' : ''}
-              onClick={() => switchInputMode('mouse')}
-            >
-              鼠标模式
-            </button>
-            <button
-              className={inputMode === 'keyboard' ? 'active' : ''}
-              onClick={() => switchInputMode('keyboard')}
-            >
-              键盘模式
-            </button>
-          </div>
-
-          {inputMode === 'pose' && <div className="menu-options">{poseOptions}</div>}
-
-          {bootError && <div className="start-error">{bootError}</div>}
-
-          <button className="start-btn" onClick={startGame} disabled={booting}>
-            {booting ? '正在加载姿态模型…' : '开始游戏'}
-          </button>
-
-          <p className="start-sub" style={{ fontSize: 12, opacity: 0.7 }}>
-            体感模式首次启动需要从 CDN 下载 MediaPipe 的 wasm 与姿态模型（约 10MB），请保持联网。
-          </p>
         </div>
       )}
     </div>
