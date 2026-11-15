@@ -83,14 +83,12 @@ export const PADDLE = {
   /**
    * 挥拍在 Z 方向的厚度（米）：球从拍面旁边掠过时也算打中。
    *
-   * 挥拍本身有 0.17s 的有效窗口，球在这段时间里飞过 0.8m 以上，
+   * 挥拍本身有一段有效窗口，
    * 所以决定"挥早挥晚"的主要是那个时间窗口，而不是这里的厚度。
    * 厚度取小一点，击球点才会贴着拍面，而不是球还在半路就被打飞。
    */
   swingDepth: 0.05,
-  /** 挥拍后"可击中"状态的持续时间（秒） */
-  swingActiveTime: 0.17,
-  /** 手动击球辅助：适度放宽提前挥拍和拍面内的偏差 */
+  /** 标准档的提前挥拍和拍面偏差 */
   assistSwingActiveTime: 0.30,
   assistBladeReach: 0.18,
   /** 两次挥拍之间的最小间隔（秒） */
@@ -150,7 +148,6 @@ export const AI_PRESETS: Record<'easy' | 'normal' | 'hard', AIConfig> = {
 }
 
 export const HIT_JUDGMENT_PRESETS = {
-  original: { swingTime: PADDLE.swingActiveTime, bladeReach: PADDLE.bladeReach },
   light: { swingTime: 0.23, bladeReach: 0.15 },
   standard: { swingTime: PADDLE.assistSwingActiveTime, bladeReach: PADDLE.assistBladeReach },
   strong: { swingTime: 0.36, bladeReach: 0.20 },

@@ -126,7 +126,7 @@ export class PingPongGame {
   private predictionTimer = 0
   private interceptX: number | null = null
   private playerBounceAge = 0
-  private activeHitJudgment: HitJudgment = 'original'
+  private activeHitJudgment: HitJudgment = 'standard'
 
   constructor(options: GameOptions = {}) {
     const preset = options.ai ?? 'normal'
@@ -143,7 +143,7 @@ export class PingPongGame {
       timeScale: options.timeScale ?? 1,
       autoMove: options.autoMove ?? false,
       autoSwing: options.autoSwing ?? false,
-      hitJudgment: options.hitJudgment ?? 'original',
+      hitJudgment: options.hitJudgment ?? 'standard',
       predictionAssist: options.predictionAssist ?? false,
       softAlign: options.softAlign ?? false,
       softAlignStrength: options.softAlignStrength ?? 0.6,
@@ -345,7 +345,7 @@ export class PingPongGame {
     // —— 我方挥拍命中判定 ——
     if (
       s.playerPaddle.activeTimer > 0 &&
-      (this.activeHitJudgment === 'original' || (s.playerWindowOpen && s.lastHitter === 'opponent' && s.ball.vel.z < 0))
+      s.playerWindowOpen && s.lastHitter === 'opponent' && s.ball.vel.z < 0
     ) {
       const reach = checkSwingReach(
         s.ball,
@@ -524,7 +524,7 @@ export class PingPongGame {
     if (p.cooldown > 0) return
 
     // 球拍平面附近才挥：太早挥会打空，太晚球已经过去了。
-    // 挥拍有 0.17s 的有效窗口，所以提前一点挥也来得及，
+    // 挥拍有一段有效窗口，所以提前一点挥也来得及，
     // 只要球进到拍面厚度范围时挥拍还生效就行。
     const gap = b.pos.z - PADDLE.homeZ
     if (gap > 0.25 || gap < -0.15) return

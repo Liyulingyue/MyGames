@@ -37,13 +37,16 @@ console.log('=== 对手挥拍动画 ===')
   assert('重新开始清除对手挥拍动画', game.state.opponentPaddle.swingAnim === 0)
 }
 
-console.log('=== 手动击球辅助 ===')
+console.log('=== 手动击球判定 ===')
 {
   function attempt(
-    level: HitJudgment,
+    level: HitJudgment | undefined,
     delay: number,
     offsetX: number,
-    options: { windowOpen?: boolean; velocityZ?: number; depth?: number; swing?: boolean; changeTo?: HitJudgment } = {},
+    options: {
+      windowOpen?: boolean; velocityZ?: number; depth?: number; swing?: boolean
+      changeTo?: HitJudgment; lastHitter?: 'player' | 'opponent'
+    } = {},
   ): number {
     const game = new PingPongGame({ seed: 17, hitJudgment: level, slowMotion: false, autoHeight: false })
     game.start()
@@ -59,38 +62,39 @@ console.log('=== 手动击球辅助 ===')
     for (let i = 0; i < Math.round(delay / FIXED_DT); i++) game.step(FIXED_DT)
     s.ball.pos = { x: offsetX, y: s.playerPaddle.y, z: PADDLE.homeZ + (options.depth ?? 0.02) }
     s.ball.vel = { x: 0, y: 0, z: options.velocityZ ?? -2 }
+    s.lastHitter = options.lastHitter ?? 'opponent'
     const events = game.step(FIXED_DT * 2)
     return events.filter((event) => event.type === 'paddleHit' && event.side === 'player' && event.power === 0.75).length
   }
 
   const delays = [0.08, 0.12, 0.20, 0.24, 0.28, 0.31]
   const offsets = [0, 0.10, 0.15, 0.19]
-  let originalHits = 0
+  let lightHits = 0
   let assistedHits = 0
   for (const delay of delays) {
     for (const offset of offsets) {
-      originalHits += attempt('original', delay, offset)
+      lightHits += attempt('light', delay, offset)
       assistedHits += attempt('standard', delay, offset)
     }
   }
-  assert('固定输入下辅助增加命中（15/24，原判定 4/24）', originalHits === 4 && assistedHits === 15,
-    `原判定 ${originalHits}/24，辅助 ${assistedHits}/24`)
+  assert('固定输入下标准档命中多于弱档', assistedHits === 15 && assistedHits > lightHits,
+    `弱档 ${lightHits}/24，标准档 ${assistedHits}/24`)
+  assert('未指定档位时默认使用标准判定',
+    new PingPongGame().options.hitJudgment === 'standard' &&
+      attempt(undefined, 0.27, 0.17) === 1 && attempt(undefined, 0.08, 0, { windowOpen: false }) === 0)
   assert('不挥拍不会自动击球', attempt('standard', 0.08, 0, { swing: false }) === 0)
   assert('未落台不能辅助击球', attempt('standard', 0.08, 0, { windowOpen: false }) === 0)
   assert('远离球拍的球不能辅助击球', attempt('standard', 0.08, 0, { depth: 0.08 }) === 0)
   assert('飞离球拍的球不能辅助击球', attempt('standard', 0.08, 0, { velocityZ: 2 }) === 0)
   assert('横向超出辅助范围不能击球', attempt('standard', 0.08, 0.19) === 0)
-  assert('原始档保留原判定', attempt('original', 0.20, 0) === 0 &&
-    attempt('original', 0.08, 0.15) === 0 && attempt('original', 0.08, 0, { windowOpen: false }) === 1)
-  assert('弱档比原始档放宽时机和拍面范围',
-    attempt('original', 0.19, 0.14) === 0 && attempt('light', 0.19, 0.14) === 1)
   assert('标准档比弱档放宽时机和拍面范围',
     attempt('light', 0.27, 0.17) === 0 && attempt('standard', 0.27, 0.17) === 1)
   assert('强档比标准档放宽时机和拍面范围',
     attempt('standard', 0.33, 0.19) === 0 && attempt('strong', 0.33, 0.19) === 1)
-  assert('所有辅助档仍需合法来球，前后距离不变',
+  assert('所有档位都需合法来球，前后距离不变',
     (['light', 'standard', 'strong'] as const).every((level) =>
       attempt(level, 0.08, 0, { windowOpen: false }) === 0 &&
+      attempt(level, 0.08, 0, { lastHitter: 'player' }) === 0 &&
       attempt(level, 0.08, 0, { velocityZ: 2 }) === 0 &&
       attempt(level, 0.08, 0, { depth: 0.08 }) === 0))
   assert('切档不改变已经挥出的判定，下次挥拍起生效',
@@ -157,22 +161,8 @@ console.log('\n=== 固定来球对比 ===')
     return { attempted, hit: false }
   }
 
-  let attempts = 0
-  let originalHits = 0
-  let assistedHits = 0
-  for (let seed = 1; seed <= 30; seed++) {
-    const original = firstReturn(seed, 'original')
-    const assisted = firstReturn(seed, 'standard')
-    if (original.attempted && assisted.attempted) attempts++
-    if (original.hit) originalHits++
-    if (assisted.hit) assistedHits++
-  }
-  assert('相同种子和挥拍策略下辅助提高首球命中', attempts >= 20 && assistedHits >= originalHits + 5,
-    `共同挥拍 ${attempts}/30，原判定 ${originalHits}，辅助 ${assistedHits}`)
-  console.log(`  首球对比：共同挥拍 ${attempts}/30，原判定 ${originalHits}，辅助 ${assistedHits}`)
-
-  const levels: HitJudgment[] = ['original', 'light', 'standard', 'strong']
-  for (const [offset, swingAt] of [[0.14, 0.20], [0.16, 0.25], [0.19, 0.33]]) {
+  const levels: HitJudgment[] = ['light', 'standard', 'strong']
+  for (const [offset, swingAt] of [[0.16, 0.25], [0.19, 0.33]]) {
     const hits = levels.map((level) => {
       let total = 0
       for (let seed = 1; seed <= 30; seed++) {
@@ -181,12 +171,12 @@ console.log('\n=== 固定来球对比 ===')
       }
       return total
     })
-    const expectedStep = offset === 0.14 ? 1 : offset === 0.16 ? 2 : 3
+    const expectedStep = offset === 0.16 ? 1 : 2
     assert(`30 组固定来球区分档位（偏差 ${offset}m，时机 ${swingAt}s）`,
       hits[expectedStep] >= hits[expectedStep - 1] + 10 &&
         hits.every((count, i) => i === 0 || count >= hits[i - 1]),
-      `原始/弱/标准/强：${hits.join('/')}`)
-    console.log(`  原始/弱/标准/强：${hits.map((count) => `${count}/30`).join(' / ')}`)
+      `弱/标准/强：${hits.join('/')}`)
+    console.log(`  弱/标准/强：${hits.map((count) => `${count}/30`).join(' / ')}`)
   }
 }
 

@@ -122,7 +122,7 @@ export function checkPaddleOverlap(ball: Ball, paddle: Paddle): PaddleHit | null
  * 挥拍命中判定。
  *
  * 球必须真的落在拍面上：
- *   - 拍面平面内（XY），球心到拍心的距离不能超过 PADDLE.bladeReach
+ *   - 拍面平面内（XY），球心到拍心的距离不能超过 bladeReach
  *   - 只有 Z 方向（球飞过拍面的那一下）留一点厚度 PADDLE.swingDepth
  *
  * 以前这里用的是"球心到拍心 29cm 的球形范围"，比拍面（半径 7.5cm）大得多，

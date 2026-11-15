@@ -20,12 +20,11 @@ type Difficulty = 'easy' | 'normal' | 'hard'
 type Screen = 'menu' | 'settings' | 'playing'
 
 const HIT_JUDGMENT_LABELS: Record<HitJudgment, string> = {
-  original: '原始',
   light: '弱',
   standard: '标准',
   strong: '强',
 }
-const HIT_JUDGMENT_LEVELS: HitJudgment[] = ['original', 'light', 'standard', 'strong']
+const HIT_JUDGMENT_LEVELS: HitJudgment[] = ['light', 'standard', 'strong']
 
 /**
  * 由"挥拍灵敏度"推出垂直位移阈值。
@@ -1630,7 +1629,7 @@ export default function App() {
                     挥拍有效期 {HIT_JUDGMENT_PRESETS[hitJudgment].swingTime.toFixed(2)} 秒模拟时间 ·
                     拍面偏差 {(HIT_JUDGMENT_PRESETS[hitJudgment].bladeReach * 100).toFixed(0)}cm ·
                     前后距离 {PADDLE.swingDepth * 100}cm。标准档为原有辅助效果；
-                    辅助档只对落台后飞向球拍的来球生效，原始档保留旧判定。仍需自己走位和挥拍；修改从下次挥拍起生效。
+                    只对落台后飞向球拍的来球生效。仍需自己走位和挥拍；修改从下次挥拍起生效。
                   </div>
                 </div>
 
