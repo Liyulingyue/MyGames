@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PingPongGame } from './core/game.ts'
-import { AI_PRESETS, PLAYER, TARGET_SCORE } from './core/constants.ts'
+import { AI_PRESETS, PLAYER, RAGE, TARGET_SCORE } from './core/constants.ts'
 import type { Phase, Side } from './core/types.ts'
 import { GameRenderer } from './render/renderer.ts'
 import { CAMERA_LIMITS, DEFAULT_CAMERA, VIEW, checkFrame, type CameraPose } from './render/view.ts'
-import { PoseTracker, isVisible } from './input/poseTracker.ts'
+import { PoseTracker, isVisible, handsRaised } from './input/poseTracker.ts'
 import type { MotionSource, PoseFrame } from './input/poseTracker.ts'
 import { SwingDetector, paddleTargetFromPose, pickArmSample, handOf, isMouseSwing } from './input/swingDetector.ts'
 import type { SwingSource } from './input/swingDetector.ts'
@@ -37,6 +37,14 @@ function verticalThresholdOf(sensitivity: number): number {
  */
 const POSE_DEFAULT_TIME_SCALE = 0.85
 const NORMAL_DEFAULT_TIME_SCALE = 1
+
+/**
+ * 体感爆气手势的保持时长（秒）。
+ *
+ * 双手举过头顶后需要保持这段时间才触发：举手瞬间（比如伸懒腰、
+ * 挥拍随挥）不算，避免误触。怒气条上会实时显示充能进度。
+ */
+const SMASH_GESTURE_HOLD = 0.6
 
 /**
  * 开发调试用的合成姿态帧。
@@ -83,8 +91,24 @@ interface HudState {
   swingSpeed: number
   /** 体感模式下手臂的垂直位移（肩宽），实时反馈 */
   swingVert: number
-  /** 本局结束时的结果 */
-  gameOver: { winner: Side; player: number; opponent: number } | null
+  /** 本回合的对拉次数（回合越长越精彩） */
+  rallyHits: number
+  /** 爆气怒气值 0~RAGE.max */
+  rage: number
+  /** 是否处于爆气武装状态（下一次命中即扣杀） */
+  smashArmed: boolean
+  /** 体感爆气手势的充能进度 0~1（双手举过头顶保持中） */
+  smashCharge: number
+  /** 本局结束时的结果与统计 */
+  gameOver: {
+    winner: Side
+    player: number
+    opponent: number
+    /** 本局最长的一次对拉（拍数） */
+    longestRally: number
+    /** 玩家本局总击球数 */
+    playerHits: number
+  } | null
 }
 
 const INITIAL_HUD: HudState = {
@@ -105,6 +129,10 @@ const INITIAL_HUD: HudState = {
   armSource: null,
   swingSpeed: 0,
   swingVert: 0,
+  rallyHits: 0,
+  rage: 0,
+  smashArmed: false,
+  smashCharge: 0,
   gameOver: null,
 }
 
@@ -112,10 +140,20 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('menu')
   const [inputMode, setInputMode] = useState<InputMode>('keyboard')
   const [difficulty, setDifficulty] = useState<Difficulty>('normal')
+  /** 一局先到多少分获胜（开始界面可选） */
+  const [targetScore, setTargetScore] = useState<number>(TARGET_SCORE)
   const [swingThreshold, setSwingThreshold] = useState<number>(PLAYER.swingThreshold)
   const [slowMotion, setSlowMotion] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
   const [showPoseOverlay, setShowPoseOverlay] = useState(true)
+  /**
+   * 左上角状态面板是否展开。
+   *
+   * 默认收起：面板信息偏调试性质，展开时高度很大，
+   * 会挡住滑步到画面左侧的对手人形；需要看体感数值时点标题栏展开。
+   * 摄像头出错 / 加载中时会自动展开，保证看得到原因。
+   */
+  const [statusOpen, setStatusOpen] = useState(false)
   const [timeScale, setTimeScale] = useState<number>(NORMAL_DEFAULT_TIME_SCALE)
   const [autoMove, setAutoMove] = useState(false)
   const [autoSwing, setAutoSwing] = useState(false)
@@ -142,6 +180,18 @@ export default function App() {
   const [hud, setHud] = useState<HudState>(INITIAL_HUD)
   const [bootError, setBootError] = useState<string | null>(null)
   const [booting, setBooting] = useState(false)
+  /** 本局统计：最长对拉 / 玩家总击球数（结算面板展示） */
+  const statsRef = useRef({ longestRally: 0, playerHits: 0 })
+  /** 连续得分（双方各自），用于连胜文案 */
+  const streakRef = useRef({ player: 0, opponent: 0 })
+  /**
+   * 体感爆气手势状态。
+   *
+   * hold：双手举过头顶已经保持的秒数；
+   * latched：本次举手已经触发过爆气，必须把手放下才能再来一次
+   * （防止一次举手在怒气重新攒满的瞬间又误触发）。
+   */
+  const smashGestureRef = useRef({ hold: 0, latched: false })
 
   const containerRef = useRef<HTMLDivElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
@@ -160,6 +210,7 @@ export default function App() {
   const slowMotionRef = useRef(slowMotion)
   const swingThresholdRef = useRef(swingThreshold)
   const difficultyRef = useRef(difficulty)
+  const targetScoreRef = useRef(targetScore)
   const showPoseOverlayRef = useRef(showPoseOverlay)
   const timeScaleRef = useRef(timeScale)
   const autoMoveRef = useRef(autoMove)
@@ -177,6 +228,7 @@ export default function App() {
   slowMotionRef.current = slowMotion
   swingThresholdRef.current = swingThreshold
   difficultyRef.current = difficulty
+  targetScoreRef.current = targetScore
   showPoseOverlayRef.current = showPoseOverlay
   timeScaleRef.current = timeScale
   autoMoveRef.current = autoMove
@@ -293,10 +345,12 @@ export default function App() {
     setScreen('playing')
   }, [setupCamera, ensureKeyboard, ensureDetector, ensureSound])
 
-  /** 重新开一局（比分清零，球拍回到中间） */
+  /** 重新开一局（比分清零，球拍回到中间，统计与连胜也一并重置） */
   const restartGame = useCallback(() => {
     const game = gameRef.current
     if (!game) return
+    statsRef.current = { longestRally: 0, playerHits: 0 }
+    streakRef.current = { player: 0, opponent: 0 }
     game.start()
     setHud((h) => ({
       ...h,
@@ -305,6 +359,7 @@ export default function App() {
       message: null,
       messageKind: null,
       gameOver: null,
+      rallyHits: 0,
     }))
   }, [])
 
@@ -325,7 +380,7 @@ export default function App() {
     const game = new PingPongGame({
       seed: Math.floor(Math.random() * 1e9),
       ai: difficultyRef.current,
-      targetScore: TARGET_SCORE,
+      targetScore: targetScoreRef.current,
       slowMotion: slowMotionRef.current,
       timeScale: timeScaleRef.current,
       autoMove: autoMoveRef.current,
@@ -413,6 +468,8 @@ export default function App() {
     let messageUntil = 0
     /** 上一次的回合阶段，用来在"发球"时响一声提示 */
     let lastPhase = ''
+    /** 爆气手势的充能进度 0~1（体感模式、怒气满、双手举高时增长） */
+    let smashCharge = 0
     /** 最近一帧姿态数据（真实摄像头或调试注入） */
     let lastFrame: PoseFrame | null = null
 
@@ -529,6 +586,10 @@ export default function App() {
       const mouseTarget = mouse.update()
       const mouseSwing = mouse.consumeSwing()
 
+      // 爆气（F 键）：键盘控制器全程挂着，三种输入模式都可用；
+      // 怒气不满时 game.armSmash() 会安静地返回 false
+      if (ensureKeyboard().consumeSmash()) game.armSmash()
+
       if (inputModeRef.current === 'pose') {
         const tracker = trackerRef.current
         // 摄像头是在开始界面初始化的，那时还没有预览容器，这里补挂一次
@@ -560,6 +621,25 @@ export default function App() {
             if (result.swung) game.swing(result.power)
           }
         }
+
+        // 爆气手势：双手举过头顶保持 SMASH_GESTURE_HOLD 秒 → 爆气。
+        // 体感模式人站在摄像头前，这是比"跑去按 F"科学的触发方式；
+        // 触发过一次后必须把手放下才能再来（latched）。
+        {
+          const gesture = smashGestureRef.current
+          if (handsRaised(tracker?.landmarks)) {
+            if (!gesture.latched) {
+              gesture.hold += dt
+              if (game.state.rage >= RAGE.max && gesture.hold >= SMASH_GESTURE_HOLD) {
+                game.armSmash()
+                gesture.latched = true
+              }
+            }
+          } else {
+            gesture.hold = 0
+            gesture.latched = false
+          }
+        }
       } else if (inputModeRef.current === 'mouse') {
         game.setPlayerTarget(mouseTarget.x)
         if (mouseSwing) game.swing(0.75)
@@ -570,6 +650,18 @@ export default function App() {
         if (keyboard.consumeSwing()) game.swing(0.75)
       }
 
+      // 离开体感模式时清掉手势进度；充能进度只在"体感 + 怒气满 + 未武装"时显示
+      if (inputModeRef.current !== 'pose') {
+        smashGestureRef.current.hold = 0
+        smashGestureRef.current.latched = false
+      }
+      smashCharge =
+        inputModeRef.current === 'pose' &&
+        game.state.rage >= RAGE.max &&
+        game.state.smashArmed <= 0
+          ? Math.min(1, smashGestureRef.current.hold / SMASH_GESTURE_HOLD)
+          : 0
+
       // ---- 推进游戏 ----
       const events = game.step(dt)
       // 发球提示：进入 serve 阶段时响一声
@@ -577,11 +669,17 @@ export default function App() {
       lastPhase = game.state.phase
       // 击球的这一帧同时会有 swing 和 paddleHit 两个事件，
       // 这时只播"啪"，不播挥空的风声——否则每次得分都是两声。
+      // 扣杀命中的那一帧则只播扣杀重击声，不叠普通击球声。
       const playerHit = events.some((e) => e.type === 'paddleHit' && e.side === 'player')
+      const smashHit = events.some((e) => e.type === 'smash')
       for (const ev of events) {
+        // 表现层反馈：击球火花、对手情绪动画、扣杀震动
+        renderer.notifyEvent(ev)
+
         switch (ev.type) {
           case 'paddleHit':
-            sound.play('paddle', ev.power ?? 0.7)
+            if (!(smashHit && ev.side === 'player')) sound.play('paddle', ev.power ?? 0.7)
+            if (ev.side === 'player') statsRef.current.playerHits++
             break
           case 'bounce':
             sound.play('bounce')
@@ -591,6 +689,12 @@ export default function App() {
             break
           case 'swing':
             if (!playerHit) sound.play('whiff', ev.power ?? 0.6)
+            break
+          case 'smashArm':
+            sound.play('smashArm')
+            break
+          case 'smash':
+            sound.play('smash')
             break
           case 'point':
             sound.play('point')
@@ -602,11 +706,52 @@ export default function App() {
             break
         }
 
-        if (ev.type === 'point') {
-          const won = ev.winner === 'player'
+        if (ev.type === 'smashArm') {
           setHud((h) => ({
             ...h,
-            message: won ? '得分！' : '失分',
+            message: '爆气！下一次命中就是扣杀',
+            messageKind: 'good',
+          }))
+          messageUntil = now + 1200
+        } else if (ev.type === 'smash') {
+          setHud((h) => ({
+            ...h,
+            message: '扣 杀 !',
+            messageKind: 'good',
+          }))
+          messageUntil = now + 900
+        } else if (ev.type === 'point') {
+          // 得分文案按"连胜 + 对拉长度"变化，比单调的得分/失分有代入感
+          const won = ev.winner === 'player'
+          const rally = game.state.rallyHits
+          statsRef.current.longestRally = Math.max(statsRef.current.longestRally, rally)
+          let message: string
+          if (won) {
+            streakRef.current.player++
+            streakRef.current.opponent = 0
+            if (streakRef.current.player >= 3) {
+              message = `势不可挡！连得 ${streakRef.current.player} 分`
+            } else if (rally >= 8) {
+              message = `神仙对拉 x${rally}，这一分太精彩了！`
+            } else if (rally >= 5) {
+              message = `精彩回合 x${rally}！`
+            } else {
+              message = '得分！'
+            }
+          } else {
+            streakRef.current.opponent++
+            streakRef.current.player = 0
+            if (streakRef.current.opponent >= 3) {
+              message = `对手连得 ${streakRef.current.opponent} 分，稳住！`
+            } else if (rally >= 8) {
+              message = `可惜，缠斗 ${rally} 拍还是丢了`
+            } else {
+              message = '失分'
+            }
+          }
+          setHud((h) => ({
+            ...h,
+            message,
             messageKind: won ? 'good' : 'bad',
           }))
           messageUntil = now + 1200
@@ -617,7 +762,13 @@ export default function App() {
             ...h,
             message: winner === 'player' ? '你赢了！' : '你输了',
             messageKind: winner === 'player' ? 'good' : 'bad',
-            gameOver: { winner, player: score.player, opponent: score.opponent },
+            gameOver: {
+              winner,
+              player: score.player,
+              opponent: score.opponent,
+              longestRally: statsRef.current.longestRally,
+              playerHits: statsRef.current.playerHits,
+            },
           }))
           messageUntil = now + 4000
         }
@@ -659,6 +810,10 @@ export default function App() {
           armSource: sample?.source ?? null,
           swingSpeed: sample?.speed ?? 0,
           swingVert: sample?.verticalRange ?? 0,
+          rallyHits: s.rallyHits,
+          rage: s.rage,
+          smashArmed: s.smashArmed > 0,
+          smashCharge,
           message: now < messageUntil ? h.message : null,
           messageKind: now < messageUntil ? h.messageKind : null,
         }))
@@ -679,14 +834,15 @@ export default function App() {
     }
   }, [screen, ensureKeyboard, ensureDetector, ensureMouse, ensureSound])
 
-  // 难度 / 慢动作实时生效（不重开一局）
+  // 难度 / 目标分数 / 慢动作实时生效（不重开一局）
   useEffect(() => {
     const game = gameRef.current
     if (!game) return
     game.options.ai = difficulty
     game.options.aiConfig = AI_PRESETS[difficulty]
+    game.options.targetScore = targetScore
     game.options.slowMotion = slowMotion
-  }, [difficulty, slowMotion])
+  }, [difficulty, targetScore, slowMotion])
 
   // 音效开关 / 音量实时生效
   useEffect(() => {
@@ -694,6 +850,11 @@ export default function App() {
     sound.setEnabled(soundOn)
     sound.setVolume(soundVolume)
   }, [soundOn, soundVolume, ensureSound])
+
+  // 摄像头出错 / 加载中时自动展开状态面板（收起状态看不到错误原因）
+  useEffect(() => {
+    if (hud.cameraError || hud.cameraState === 'loading') setStatusOpen(true)
+  }, [hud.cameraError, hud.cameraState])
 
   // 按钮点击的轻响（全局挂一次，任何按钮都算数）
   useEffect(() => {
@@ -845,6 +1006,90 @@ export default function App() {
     </>
   )
 
+  /**
+   * 游戏参数预设（开始界面用，和游戏内 ⚙ 面板共享同一份状态）。
+   *
+   * 以前这些参数只能开局后在设置里改，开局前完全看不到——
+   * 现在难度、目标分数、球速、慢动作都可以在开始界面先定好。
+   */
+  const difficultyHint =
+    difficulty === 'easy'
+      ? '新手友好：对手反应慢、走位慢、失误也多，适合先熟悉挥拍。'
+      : difficulty === 'hard'
+        ? '对手又快又稳，还会专打你的空档，来点挑战。'
+        : '标准对打节奏，反应和失误率都比较均衡。'
+
+  const gameOptions = (
+    <>
+      <div className="setting">
+        <div className="setting-label">
+          <span>对手强度</span>
+        </div>
+        <div className="seg">
+          {(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => (
+            <button
+              key={d}
+              className={difficulty === d ? 'active' : ''}
+              onClick={() => setDifficulty(d)}
+            >
+              {d === 'easy' ? '简单' : d === 'normal' ? '普通' : '困难'}
+            </button>
+          ))}
+        </div>
+        <div className="setting-hint">{difficultyHint}</div>
+      </div>
+
+      <div className="setting">
+        <div className="setting-label">
+          <span>目标分数</span>
+        </div>
+        <div className="seg">
+          {[6, 11, 21].map((score) => (
+            <button
+              key={score}
+              className={targetScore === score ? 'active' : ''}
+              onClick={() => setTargetScore(score)}
+            >
+              {score} 分
+            </button>
+          ))}
+        </div>
+        <div className="setting-hint">先到目标分数获胜。6 分适合快节奏热身，11 分是标准局。</div>
+      </div>
+
+      <div className="setting">
+        <div className="setting-label">
+          <span>球速节奏</span>
+          <b>{timeScale.toFixed(2)}x</b>
+        </div>
+        <input
+          type="range"
+          min={0.3}
+          max={1.2}
+          step={0.05}
+          value={timeScale}
+          onChange={(e) => {
+            speedTouchedRef.current = true
+            setTimeScale(Number(e.target.value))
+          }}
+        />
+        <div className="setting-hint">
+          相当于慢动作：弹道不变，整个比赛变慢，反应时间更多。体感模式建议 0.8 左右。
+        </div>
+      </div>
+
+      <label className="setting switch">
+        <span>慢动作辅助</span>
+        <input
+          type="checkbox"
+          checked={slowMotion}
+          onChange={(e) => setSlowMotion(e.target.checked)}
+        />
+      </label>
+      <div className="setting-hint">球快打到你这边的瞬间放慢时间，给挥拍留出反应窗口。</div>
+    </>
+  )
+
   const prompt = (() => {
     if (hud.message) {
       return {
@@ -881,11 +1126,58 @@ export default function App() {
               <span className="score-label">对手</span>
               <span className="score-value">{hud.score.opponent}</span>
             </div>
+            {!hud.gameOver &&
+              (hud.score.player >= targetScore - 1 || hud.score.opponent >= targetScore - 1) && (
+                <span className="matchpoint-pill">赛点</span>
+              )}
           </div>
 
-          <div className="status-panel">
-            <div className="status-row">
-              <span>
+          {hud.phase === 'rally' && hud.rallyHits >= 3 && (
+            <div className="rally-badge">对拉 x{hud.rallyHits}</div>
+          )}
+
+          {!hud.gameOver && (
+            <button
+              type="button"
+              className={`rage-bar${hud.rage >= RAGE.max ? ' full' : ''}${hud.smashArmed ? ' armed' : ''}`}
+              onClick={() => gameRef.current?.armSmash()}
+              title={
+                inputMode === 'pose'
+                  ? '怒气攒满后双手举过头顶保持片刻即可爆气（也可按 F 或点击这里）'
+                  : '怒气攒满后点击（或按 F）爆气，5 秒内下一次命中球的挥拍变成扣杀'
+              }
+            >
+              <span
+                className="rage-fill"
+                style={{ width: `${Math.min(100, (hud.rage / RAGE.max) * 100)}%` }}
+              />
+              {hud.smashCharge > 0 && (
+                <span
+                  className="rage-charge"
+                  style={{ width: `${hud.smashCharge * 100}%` }}
+                />
+              )}
+              <span className="rage-label">
+                {hud.smashArmed
+                  ? '扣杀已就绪 · 挥拍！'
+                  : hud.rage >= RAGE.max
+                    ? hud.smashCharge > 0
+                      ? '保持举高…'
+                      : inputMode === 'pose'
+                        ? '爆气就绪 · 举双手 / 按 F'
+                        : '爆气就绪 · 按 F 或点击'
+                    : '怒气'}
+              </span>
+            </button>
+          )}
+
+          <div className={`status-panel${statusOpen ? '' : ' collapsed'}`}>
+            <button
+              className="status-header"
+              onClick={() => setStatusOpen((v) => !v)}
+              title={statusOpen ? '收起状态面板（不挡对手）' : '展开状态面板（体感调试数值）'}
+            >
+              <span className="status-mode">
                 <i className={`dot ${hud.cameraState === 'ready' ? 'ok' : 'warn'}`} />
                 {inputMode === 'pose'
                   ? hud.cameraState === 'ready'
@@ -895,87 +1187,91 @@ export default function App() {
                     ? '鼠标模式'
                     : '键盘模式'}
               </span>
-            </div>
-            {inputMode === 'pose' && (
-              <>
-                <div className="status-row">
-                  <span>体感识别人</span>
-                  <b>{hud.hasPerson ? '是' : '否'}</b>
-                </div>
-                <div className="status-row">
-                  <span>身体位置</span>
-                  <b>{hud.bodyPos.toFixed(2)}</b>
-                </div>
-                <div className="status-row">
-                  <span>挥拍手</span>
-                  <b>
-                    {swingSource === 'left'
-                      ? '左手'
-                      : swingSource === 'right'
-                        ? '右手'
-                        : swingSource === 'mouse'
+              <span className="status-meta">
+                {hud.fps} fps
+                <i className="chevron">{statusOpen ? '▴' : '▾'}</i>
+              </span>
+            </button>
+            {statusOpen && (
+              <div className="status-body">
+                {inputMode === 'pose' && (
+                  <>
+                    <div className="status-row">
+                      <span>体感识别人</span>
+                      <b>{hud.hasPerson ? '是' : '否'}</b>
+                    </div>
+                    <div className="status-row">
+                      <span>身体位置</span>
+                      <b>{hud.bodyPos.toFixed(2)}</b>
+                    </div>
+                    <div className="status-row">
+                      <span>挥拍手</span>
+                      <b>
+                        {swingSource === 'left'
+                          ? '左手'
+                          : swingSource === 'right'
+                            ? '右手'
+                            : swingSource === 'mouse'
+                              ? '鼠标左键'
+                              : '双手'}
+                      </b>
+                    </div>
+                    <div className="status-row">
+                      <span>采样点</span>
+                      <b className={hud.armSeen || isMouseSwing(swingSource) ? '' : 'bad'}>
+                        {isMouseSwing(swingSource)
                           ? '鼠标左键'
-                          : '双手'}
-                  </b>
-                </div>
-                <div className="status-row">
-                  <span>采样点</span>
-                  <b className={hud.armSeen || isMouseSwing(swingSource) ? '' : 'bad'}>
-                    {isMouseSwing(swingSource)
-                      ? '鼠标左键'
-                      : hud.armSource === 'wrist'
-                        ? '手腕'
-                        : hud.armSource === 'elbow'
-                          ? '肘部（兜底）'
-                          : '无'}
-                  </b>
-                </div>
-                <div className="status-row">
-                  <span>挥拍速度</span>
-                  <b className={hud.swingSpeed >= effSwingThreshold ? 'hot' : ''}>
-                    {hud.swingSpeed.toFixed(2)} / {effSwingThreshold.toFixed(2)}
-                  </b>
-                </div>
-                <div className="status-row">
-                  <span>垂直位移</span>
-                  <b className={hud.swingVert >= effVertThreshold ? 'hot' : ''}>
-                    {hud.swingVert.toFixed(3)} / {effVertThreshold.toFixed(3)}
-                  </b>
-                </div>
-                <div className="status-note">
-                  {isMouseSwing(swingSource) ? (
-                    <>
-                      现在用鼠标左键击球：球拍位置 = 你在画面里的位置（零点 = 画面正中）。
-                      下面的手腕数值只是参考，不参与判定。
-                    </>
-                  ) : (
-                    <>
-                      速度或垂直位移超线即算挥拍（单位：肩宽，手腕每帧的移动量）。
-                      球拍位置 = 你在画面里的位置（零点 = 画面正中）。
-                      手腕没识别到时会自动改用肘部，阈值相应放宽。
-                    </>
-                  )}
-                </div>
-                {hud.cameraError && (
-                  <div className="status-error">{hud.cameraError}</div>
+                          : hud.armSource === 'wrist'
+                            ? '手腕'
+                            : hud.armSource === 'elbow'
+                              ? '肘部（兜底）'
+                              : '无'}
+                      </b>
+                    </div>
+                    <div className="status-row">
+                      <span>挥拍速度</span>
+                      <b className={hud.swingSpeed >= effSwingThreshold ? 'hot' : ''}>
+                        {hud.swingSpeed.toFixed(2)} / {effSwingThreshold.toFixed(2)}
+                      </b>
+                    </div>
+                    <div className="status-row">
+                      <span>垂直位移</span>
+                      <b className={hud.swingVert >= effVertThreshold ? 'hot' : ''}>
+                        {hud.swingVert.toFixed(3)} / {effVertThreshold.toFixed(3)}
+                      </b>
+                    </div>
+                    <div className="status-note">
+                      {isMouseSwing(swingSource) ? (
+                        <>
+                          现在用鼠标左键击球：球拍位置 = 你在画面里的位置（零点 = 画面正中）。
+                          下面的手腕数值只是参考，不参与判定。
+                        </>
+                      ) : (
+                        <>
+                          速度或垂直位移超线即算挥拍（单位：肩宽，手腕每帧的移动量）。
+                          球拍位置 = 你在画面里的位置（零点 = 画面正中）。
+                          手腕没识别到时会自动改用肘部，阈值相应放宽。
+                        </>
+                      )}
+                    </div>
+                    {hud.cameraError && (
+                      <div className="status-error">{hud.cameraError}</div>
+                    )}
+                    {hud.cameraState === 'loading' && (
+                      <div className="status-error">正在加载姿态模型…</div>
+                    )}
+                  </>
                 )}
-                {hud.cameraState === 'loading' && (
-                  <div className="status-error">正在加载姿态模型…</div>
-                )}
-              </>
+                <div className="status-row">
+                  <span>时间倍率</span>
+                  <b>{hud.timeScale.toFixed(2)}x</b>
+                </div>
+                <div className="status-row">
+                  <span>目标分数</span>
+                  <b>{targetScore} 分</b>
+                </div>
+              </div>
             )}
-            <div className="status-row">
-              <span>帧率</span>
-              <b>{hud.fps} fps</b>
-            </div>
-            <div className="status-row">
-              <span>时间倍率</span>
-              <b>{hud.timeScale.toFixed(2)}x</b>
-            </div>
-            <div className="status-row">
-              <span>目标分数</span>
-              <b>{TARGET_SCORE} 分</b>
-            </div>
           </div>
 
           {prompt && (
@@ -1000,13 +1296,13 @@ export default function App() {
 
           <div className="hints">
             {inputMode === 'pose' ? (
-              <>左右移动身体调整球拍 · 上下快速挥动手腕击球</>
+              <>左右移动身体调整球拍 · 上下快速挥动手腕击球 · 怒气满后双手举过头顶爆气</>
             ) : inputMode === 'mouse' ? (
-              <>移动鼠标调整球拍 · 点击左键挥拍</>
+              <>移动鼠标调整球拍 · 点击左键挥拍 · F 爆气</>
             ) : (
               <>
                 <kbd>←</kbd>
-                <kbd>→</kbd> 左右 · <kbd>空格</kbd> 挥拍
+                <kbd>→</kbd> 左右 · <kbd>空格</kbd> 挥拍 · <kbd>F</kbd> 爆气
               </>
             )}
           </div>
@@ -1278,8 +1574,24 @@ export default function App() {
                   <span className="sep">:</span>
                   <span className="opponent">{hud.gameOver.opponent}</span>
                 </div>
+                <div className="gameover-stats">
+                  <div className="stat">
+                    <span>最长对拉</span>
+                    <b>{hud.gameOver.longestRally} 拍</b>
+                  </div>
+                  <div className="stat">
+                    <span>你的击球</span>
+                    <b>{hud.gameOver.playerHits} 次</b>
+                  </div>
+                </div>
                 <div className="gameover-hint">
-                  {hud.gameOver.winner === 'player' ? '打得不错' : '再来一局？'}
+                  {hud.gameOver.winner === 'player'
+                    ? hud.gameOver.opponent === 0
+                      ? '零封对手，太狠了！'
+                      : hud.gameOver.longestRally >= 8
+                        ? '鏖战取胜，漂亮！'
+                        : '打得不错'
+                    : '差一点，再来一局？'}
                 </div>
                 <button className="start-btn" onClick={restartGame}>
                   再来一局
@@ -1338,6 +1650,11 @@ export default function App() {
           </div>
 
           {inputMode === 'pose' && <div className="menu-options">{poseOptions}</div>}
+
+          <div className="menu-options">
+            <div className="menu-options-title">对局设置</div>
+            {gameOptions}
+          </div>
 
           {bootError && <div className="start-error">{bootError}</div>}
 

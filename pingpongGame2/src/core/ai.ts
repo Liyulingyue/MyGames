@@ -1,5 +1,5 @@
 import type { AIConfig } from './constants.ts'
-import { PADDLE } from './constants.ts'
+import { PADDLE, RAGE } from './constants.ts'
 import type { Ball, Paddle } from './types.ts'
 import { checkSwingReach, launchTo, movePaddleToward, predictBallAtZ } from './physics.ts'
 import { clamp, rand } from './vec3.ts'
@@ -46,6 +46,8 @@ export interface AIContext {
   playerPaddle: Paddle
   /** 球是否已经在对手半场落过台（落台后才轮到 AI 击球） */
   ballBouncedOnOpponentSide: boolean
+  /** 来球是否是玩家的扣杀（AI 反应更慢、更容易失误） */
+  smashIncoming?: boolean
 }
 
 export type AIAction =
@@ -73,7 +75,8 @@ export function updateAI(ai: AIState, ball: Ball, ctx: AIContext, dt: number): A
   if (approaching) {
     if (!ai.hasTarget) {
       ai.hasTarget = true
-      ai.reactionTimer = config.reactionDelay
+      // 面对扣杀会"吓一跳"：反应延迟按倍数拉长
+      ai.reactionTimer = config.reactionDelay * (ctx.smashIncoming ? RAGE.aiReactionPanic : 1)
     }
     if (ai.predictionTimer <= 0) {
       ai.predictionTimer = 0.05
@@ -111,8 +114,9 @@ export function updateAI(ai: AIState, ball: Ball, ctx: AIContext, dt: number): A
 
   ai.engaged = true
 
-  // 漏接：AI 挥空
-  if (rng() < config.missChance) {
+  // 漏接：AI 挥空。面对扣杀时失误率明显放大（高速球很难防）
+  const missChance = config.missChance * (ctx.smashIncoming ? RAGE.aiPanicScale : 1)
+  if (rng() < missChance) {
     ai.paddle.swingAnim = 1
     return { kind: 'miss' }
   }

@@ -3,6 +3,7 @@ import {
   BALL,
   FIXED_DT,
   PADDLE,
+  RAGE,
   SERVE_ROTATION,
   TABLE,
   TARGET_SCORE,
@@ -89,6 +90,12 @@ export interface GameState {
   swingCooldown: number
   /** 我方挥拍剩余的有效时间 */
   swingActiveTimer: number
+  /** 爆气怒气值 0 ~ RAGE.max */
+  rage: number
+  /** 爆气武装剩余时间（秒）> 0 时下一次命中球的挥拍变成扣杀 */
+  smashArmed: number
+  /** 玩家的扣杀是否还在飞行中（对手会更难接） */
+  smashInFlight: boolean
 }
 
 /**
@@ -162,6 +169,9 @@ export class PingPongGame {
       lastPointWinner: null,
       swingCooldown: 0,
       swingActiveTimer: 0,
+      rage: 0,
+      smashArmed: 0,
+      smashInFlight: false,
     }
   }
 
@@ -174,6 +184,9 @@ export class PingPongGame {
     this.state.elapsed = 0
     this.state.lastPointWinner = null
     this.serveCount = 0
+    this.state.rage = 0
+    this.state.smashArmed = 0
+    this.state.smashInFlight = false
 
     // 球拍回到中间，避免新一局开始时球拍还停在上���局的位置
     this.playerTargetX = 0
@@ -220,6 +233,24 @@ export class PingPongGame {
     s.swingActiveTimer = p.activeTimer
     s.swingCooldown = p.cooldown
     this.pendingEvents.push({ type: 'swing', power: p.lastSwingPower })
+    return true
+  }
+
+  /**
+   * 爆气：怒气攒满时清空怒气，武装一次扣杀。
+   *
+   * 条件与语义：
+   * - 只有 `rage >= RAGE.max` 且当前未在武装状态才生效；
+   * - 之后的 `RAGE.armDuration` 秒内，下一次**真正命中球**的挥拍变成扣杀；
+   * - 挥空不消耗武装（怒气不退），超时未命中则武装自然消散。
+   */
+  armSmash(): boolean {
+    const s = this.state
+    if (s.phase === 'idle' || s.phase === 'gameover') return false
+    if (s.rage < RAGE.max || s.smashArmed > 0) return false
+    s.rage = 0
+    s.smashArmed = RAGE.armDuration
+    this.pendingEvents.push({ type: 'smashArm' })
     return true
   }
 
@@ -320,6 +351,7 @@ export class PingPongGame {
         config: this.options.aiConfig,
         playerPaddle: s.playerPaddle,
         ballBouncedOnOpponentSide: s.bounces.opponent >= 1,
+        smashIncoming: s.smashInFlight,
       },
       dt,
     )
@@ -330,6 +362,7 @@ export class PingPongGame {
       s.bounces = { player: 0, opponent: 0 }
       s.rallyHits++
       s.phase = 'rally'
+      s.smashInFlight = false
       events.push({
         type: 'paddleHit',
         side: 'opponent',
@@ -423,6 +456,8 @@ export class PingPongGame {
     p.swingAnim = Math.max(0, p.swingAnim - dt * 3.2)
     s.swingActiveTimer = p.activeTimer
     s.swingCooldown = p.cooldown
+    // 爆气武装倒计时（得分停顿期间 fixedUpdate 提前返回，武装冻结不流逝）
+    s.smashArmed = Math.max(0, s.smashArmed - dt)
   }
 
   /**
@@ -456,23 +491,45 @@ export class PingPongGame {
   private hitByPlayer(hit: PaddleHit, events: GameEvent[]): void {
     const s = this.state
     const p = s.playerPaddle
+    const smash = s.smashArmed > 0
 
-    // 打偏中心 → 球往反方向飞（真实乒乓球手感）
-    const aimX = clamp(p.x - hit.offsetX * 2.6 + rand(this.rng, -0.12, 0.12), -0.62, 0.62)
-    const aimZ = rand(this.rng, 0.45, 1.05)
-    const power = clamp(p.lastSwingPower, 0.15, 1)
-    // 回球速度只跟力度有关：全局"慢动作"已经让整段弹道变慢了，
-    // 这里再乘一次倍率就等于改了物理速度（会改变弹道形状，甚至碰网）。
-    const speed = lerp(PADDLE.minShotSpeed, PADDLE.maxShotSpeed, power)
+    let aimX: number
+    let aimZ: number
+    let speed: number
+    let spin: number
+    let power: number
+    if (smash) {
+      // 扣杀：又快又平，自动瞄准远离对手球拍的角落（专打空档）
+      const away = s.opponentPaddle.x >= 0 ? -1 : 1
+      aimX = clamp(away * rand(this.rng, 0.42, 0.58), -0.6, 0.6)
+      aimZ = rand(this.rng, 0.85, 1.15)
+      speed = RAGE.smashSpeed
+      spin = 0
+      power = 1
+    } else {
+      // 普通回球：打偏中心 → 球往反方向飞（真实乒乓球手感）
+      aimX = clamp(p.x - hit.offsetX * 2.6 + rand(this.rng, -0.12, 0.12), -0.62, 0.62)
+      aimZ = rand(this.rng, 0.45, 1.05)
+      power = clamp(p.lastSwingPower, 0.15, 1)
+      // 回球速度只跟力度有关：全局"慢动作"已经让整段弹道变慢了，
+      // 这里再乘一次倍率就等于改了物理速度（会改变弹道形状，甚至碰网）。
+      speed = lerp(PADDLE.minShotSpeed, PADDLE.maxShotSpeed, power)
+      spin = clamp(-hit.offsetX * 8, -20, 20)
+    }
 
     s.ball.vel = launchTo(s.ball.pos, aimX, aimZ, speed)
-    s.ball.spin = clamp(-hit.offsetX * 8, -20, 20)
+    s.ball.spin = spin
     s.lastHitter = 'player'
     s.bounces = { player: 0, opponent: 0 }
     s.playerWindowOpen = false
     s.rallyHits++
     s.phase = 'rally'
     p.activeTimer = 0
+    // 扣杀消耗武装并标记在飞；普通击球则清除在飞标记
+    s.smashArmed = 0
+    s.smashInFlight = smash
+    // 积极对打积累怒气
+    s.rage = Math.min(RAGE.max, s.rage + RAGE.hitGain)
 
     events.push({
       type: 'paddleHit',
@@ -480,6 +537,9 @@ export class PingPongGame {
       pos: { ...s.ball.pos },
       power,
     })
+    if (smash) {
+      events.push({ type: 'smash', pos: { ...s.ball.pos }, power: 1 })
+    }
   }
 
   private passivePaddleContact(side: Side, events: GameEvent[]): void {
@@ -555,8 +615,14 @@ export class PingPongGame {
     const s = this.state
     if (s.phase === 'point' || s.phase === 'gameover') return
 
-    if (winner === 'player') s.score.player++
-    else s.score.opponent++
+    if (winner === 'player') {
+      s.score.player++
+      s.rage = Math.min(RAGE.max, s.rage + RAGE.winPointGain)
+    } else {
+      s.score.opponent++
+      // 输球也给一点怒气：越是落后越接近翻盘机会（追分机制）
+      s.rage = Math.min(RAGE.max, s.rage + RAGE.losePointGain)
+    }
 
     s.phase = 'point'
     s.pointTimer = this.options.pointDelay
@@ -564,6 +630,7 @@ export class PingPongGame {
     s.playerWindowOpen = false
     s.bounces = { player: 0, opponent: 0 }
     s.lastHitter = null
+    s.smashInFlight = false
 
     events.push({
       type: 'point',
@@ -584,6 +651,7 @@ export class PingPongGame {
     s.lastHitter = null
     s.playerWindowOpen = false
     s.rallyHits = 0
+    s.smashInFlight = false
 
     // 重置 AI 的锁定状态，让它重新预判这一次发球
     this.ai.engaged = false

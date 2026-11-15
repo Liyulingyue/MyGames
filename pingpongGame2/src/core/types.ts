@@ -67,6 +67,10 @@ export type GameEventType =
   | 'gameOver'
   | 'swing'
   | 'aiMiss'
+  /** 爆气武装成功（怒气已清空，等待扣杀） */
+  | 'smashArm'
+  /** 扣杀命中（同一帧还会有 side=player 的 paddleHit） */
+  | 'smash'
 
 export interface GameEvent {
   type: GameEventType
