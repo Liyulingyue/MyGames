@@ -415,27 +415,50 @@ console.log('\n=== 场馆环境切换 ===')
     const door = room?.getObjectByName('room-door')
     const lamps = room?.children.filter((child) => child.name === 'room-lamp') ?? []
     const floorDetail = room?.getObjectByName('room-floor-detail')
+    const nightRoom = built.scene.getObjectByName('night-room')
+    const nightLamps = nightRoom?.children.filter((child) => child.name === 'night-lamp') ?? []
+    const nightWallLights = nightRoom?.children.filter((child) => child.name === 'night-wall-light') ?? []
+    const nightDoor = nightRoom?.getObjectByName('night-door')
+    const courtLines = nightRoom?.getObjectByName('night-court-lines')
     ok('明亮球室有墙边门窗、顶灯和地板细节',
       !!room?.visible && windows.length === 6 && windows.every((window) =>
         Math.abs(window.position.x) === 5 || window.position.z === 5) &&
       !!door && door.position.z === 5 && Math.abs(door.position.x) > TABLE.halfWidth &&
       lamps.length === 4 && !!floorDetail)
+    const bench = room?.getObjectByName('room-bench')
+    ok('明亮球室的长椅靠墙且远离球台',
+      !!bench && bench.position.z > TABLE.halfLength + 1 && Math.abs(bench.position.x) > TABLE.halfWidth)
+    ok('默认隐藏夜间场馆', nightRoom?.visible === false)
     ok('门窗和边框位于墙面前方且不共面',
-      !!door && [...windows, door].every((feature) => {
+      !!door && !!nightDoor && [...windows, door, nightDoor].every((feature) => {
         const [surface, ...frames] = feature.children
         return surface.position.z < -0.01 && frames.every((frame) =>
           frame instanceof Mesh && frame.geometry instanceof BoxGeometry &&
           frame.position.z + frame.geometry.parameters.depth / 2 < surface.position.z)
+      }))
+    ok('窗格接合处不相互穿透',
+      windows.every((window) => {
+        const frames = window.children.slice(1)
+        return frames.every((frame, i) => frames.slice(i + 1).every((other) => {
+          const a = new Box3().setFromObject(frame)
+          const b = new Box3().setFromObject(other)
+          return Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x) <= 1e-6 ||
+            Math.min(a.max.y, b.max.y) - Math.max(a.min.y, b.min.y) <= 1e-6 ||
+            Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z) <= 1e-6
+        }))
       }))
     built.setEnvironment('night')
     const night = background()
     ok('默认明亮环境与夜间环境不同', bright !== night)
     ok('切换不重建场景或改变相机位置',
       built.scene.children.length === objectCount && built.camera.position.equals(cameraPosition))
-    ok('夜间隐藏球室装饰', room?.visible === false)
+    ok('夜间显示场馆、房门、灯具和场地边线并隐藏明亮球室',
+      room?.visible === false && nightRoom?.visible === true && nightLamps.length === 4 &&
+      nightWallLights.length === 2 && !!nightDoor && !!courtLines)
     built.setEnvironment('bright')
     ok('切回明亮环境恢复原背景', background() === bright)
-    ok('切回明亮环境恢复同一套球室装饰', room?.visible === true && built.scene.getObjectByName('room-door') === door)
+    ok('切回明亮环境恢复同一套球室装饰并隐藏夜间场馆',
+      room?.visible === true && nightRoom?.visible === false && built.scene.getObjectByName('room-door') === door)
 
     const tableParts = built.tableTop.parent!.children.filter(
       (part): part is Mesh<BoxGeometry> => part instanceof Mesh && part.geometry instanceof BoxGeometry,

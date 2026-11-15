@@ -141,34 +141,37 @@ export function createScene(): {
   floor.receiveShadow = true
   scene.add(floor)
 
-  const room = new THREE.Group()
-  room.name = 'bright-room'
-  const wallMaterial = new THREE.MeshStandardMaterial({ color: '#c4d2cc', roughness: 1, side: THREE.DoubleSide })
-  const trimMaterial = new THREE.MeshStandardMaterial({ color: '#76978d', roughness: 1, side: THREE.DoubleSide })
-  const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 4), wallMaterial)
-  backWall.position.set(0, TABLE.floorY + 2, 5)
-  room.add(backWall)
-  const backTrim = new THREE.Mesh(new THREE.PlaneGeometry(10, 0.85), trimMaterial)
-  backTrim.position.set(0, TABLE.floorY + 0.425, 4.99)
-  room.add(backTrim)
-  for (const x of [-5, 5]) {
-    const wall = new THREE.Mesh(new THREE.PlaneGeometry(10, 4), wallMaterial)
-    wall.rotation.y = Math.PI / 2
-    wall.position.set(x, TABLE.floorY + 2, 0)
-    room.add(wall)
-    const trim = new THREE.Mesh(new THREE.PlaneGeometry(10, 0.85), trimMaterial)
-    trim.rotation.y = Math.PI / 2
-    trim.position.set(x - Math.sign(x) * 0.01, TABLE.floorY + 0.425, 0)
-    room.add(trim)
+  const createRoomShell = (name: string, wallColor: string, trimColor: string, ceilingColor: string) => {
+    const shell = new THREE.Group()
+    shell.name = name
+    const wallMaterial = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 1, side: THREE.DoubleSide })
+    const trimMaterial = new THREE.MeshStandardMaterial({ color: trimColor, roughness: 1, side: THREE.DoubleSide })
+    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 4), wallMaterial)
+    backWall.position.set(0, TABLE.floorY + 2, 5)
+    shell.add(backWall)
+    const backTrim = new THREE.Mesh(new THREE.PlaneGeometry(10, 0.85), trimMaterial)
+    backTrim.position.set(0, TABLE.floorY + 0.425, 4.99)
+    shell.add(backTrim)
+    for (const x of [-5, 5]) {
+      const wall = new THREE.Mesh(new THREE.PlaneGeometry(10, 4), wallMaterial)
+      wall.rotation.y = Math.PI / 2
+      wall.position.set(x, TABLE.floorY + 2, 0)
+      shell.add(wall)
+      const trim = new THREE.Mesh(new THREE.PlaneGeometry(10, 0.85), trimMaterial)
+      trim.rotation.y = Math.PI / 2
+      trim.position.set(x - Math.sign(x) * 0.01, TABLE.floorY + 0.425, 0)
+      shell.add(trim)
+    }
+    const ceiling = new THREE.Mesh(
+      new THREE.PlaneGeometry(10, 10),
+      new THREE.MeshBasicMaterial({ color: ceilingColor, side: THREE.DoubleSide }),
+    )
+    ceiling.rotation.x = Math.PI / 2
+    ceiling.position.y = TABLE.floorY + 4
+    shell.add(ceiling)
+    return shell
   }
-
-  const ceiling = new THREE.Mesh(
-    new THREE.PlaneGeometry(10, 10),
-    new THREE.MeshBasicMaterial({ color: '#c4d2cc', side: THREE.DoubleSide }),
-  )
-  ceiling.rotation.x = Math.PI / 2
-  ceiling.position.y = TABLE.floorY + 4
-  room.add(ceiling)
+  const room = createRoomShell('bright-room', '#c4d2cc', '#76978d', '#c4d2cc')
 
   const frameMaterial = new THREE.MeshStandardMaterial({ color: '#d1d8d1', roughness: 0.8 })
   const glassMaterial = new THREE.MeshStandardMaterial({ color: '#8faeb0', roughness: 0.9 })
@@ -177,7 +180,7 @@ export function createScene(): {
 
   const addWallFeature = (
     name: string, width: number, height: number, material: THREE.Material,
-    x: number, y: number, z: number, rotation: number,
+    x: number, y: number, z: number, rotation: number, target = room, frame = frameMaterial,
   ) => {
     const feature = new THREE.Group()
     feature.name = name
@@ -189,30 +192,36 @@ export function createScene(): {
     feature.add(surface)
     const frameWidth = 0.07
     const addFrame = (w: number, h: number, px: number, py: number) => {
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), frameMaterial)
-      frame.position.set(px, py, -0.06)
-      feature.add(frame)
+      const piece = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), frame)
+      piece.position.set(px, py, -0.06)
+      feature.add(piece)
     }
     for (const side of [-1, 1]) {
       addFrame(frameWidth, height + 2 * frameWidth, side * (width + frameWidth) / 2, 0)
       addFrame(width, frameWidth, 0, side * (height + frameWidth) / 2)
     }
-    room.add(feature)
+    target.add(feature)
     return feature
   }
 
-  for (const x of [-3.3, 3.6]) {
-    const window = addWallFeature('room-window', 1.15, 1.05, glassMaterial, x, 2.35, 5, 0)
+  const addWindowMullions = (window: THREE.Group, width: number) => {
     const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.045, 1.05, 0.04), frameMaterial)
     mullion.position.z = -0.06
     window.add(mullion)
+    for (const side of [-1, 1]) {
+      const crossbar = new THREE.Mesh(new THREE.BoxGeometry((width - 0.045) / 2, 0.035, 0.04), frameMaterial)
+      crossbar.position.set(side * (width + 0.045) / 4, -0.15, -0.06)
+      window.add(crossbar)
+    }
+  }
+  for (const x of [-3.3, 3.6]) {
+    const window = addWallFeature('room-window', 1.15, 1.05, glassMaterial, x, 2.35, 5, 0)
+    addWindowMullions(window, 1.15)
   }
   for (const side of [-1, 1]) {
     for (const z of [-1.4, 2]) {
       const window = addWallFeature('room-window', 1.3, 1.05, glassMaterial, side * 5, 2.35, z, side * Math.PI / 2)
-      const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.045, 1.05, 0.04), frameMaterial)
-      mullion.position.z = -0.06
-      window.add(mullion)
+      addWindowMullions(window, 1.3)
     }
   }
   const door = addWallFeature('room-door', 1, 2.05, doorMaterial, 1.9, 1.025, 5, 0)
@@ -220,21 +229,39 @@ export function createScene(): {
   handle.position.set(-0.37, -0.02, -0.06)
   door.add(handle)
 
-  const lampHousing = new THREE.MeshStandardMaterial({ color: '#c9d0ca', roughness: 0.8 })
-  const lampPanel = new THREE.MeshBasicMaterial({ color: '#e8e9df' })
-  for (const x of [-2, 2]) {
-    for (const z of [-1.5, 2]) {
-      const fixture = new THREE.Group()
-      fixture.name = 'room-lamp'
-      fixture.position.set(x, TABLE.floorY + 3.94, z)
-      const housing = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, 0.42), lampHousing)
-      const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.96, 0.3), lampPanel)
-      panel.rotation.x = Math.PI / 2
-      panel.position.y = -0.041
-      fixture.add(housing, panel)
-      room.add(fixture)
+  const bench = new THREE.Group()
+  bench.name = 'room-bench'
+  bench.position.set(-2.8, TABLE.floorY, 4.6)
+  const benchMaterial = new THREE.MeshStandardMaterial({ color: '#936e55', roughness: 0.88 })
+  const benchLegMaterial = new THREE.MeshStandardMaterial({ color: '#596763', roughness: 0.8 })
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.07, 0.38), benchMaterial)
+  seat.position.y = 0.39
+  bench.add(seat)
+  for (const x of [-0.52, 0.52]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.355, 0.28), benchLegMaterial)
+    leg.position.set(x, 0.1775, 0)
+    bench.add(leg)
+  }
+  room.add(bench)
+
+  const addCeilingLamps = (target: THREE.Group, name: string, housingColor: string, panelColor: string) => {
+    const lampHousing = new THREE.MeshStandardMaterial({ color: housingColor, roughness: 0.8 })
+    const lampPanel = new THREE.MeshBasicMaterial({ color: panelColor })
+    for (const x of [-2, 2]) {
+      for (const z of [-1.5, 2]) {
+        const fixture = new THREE.Group()
+        fixture.name = name
+        fixture.position.set(x, TABLE.floorY + 3.94, z)
+        const housing = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, 0.42), lampHousing)
+        const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.96, 0.3), lampPanel)
+        panel.rotation.x = Math.PI / 2
+        panel.position.y = -0.041
+        fixture.add(housing, panel)
+        target.add(fixture)
+      }
     }
   }
+  addCeilingLamps(room, 'room-lamp', '#c9d0ca', '#e8e9df')
 
   const floorLines: number[] = []
   for (let i = 0; i <= 22; i++) {
@@ -255,12 +282,55 @@ export function createScene(): {
   room.add(floorDetail)
   scene.add(room)
 
+  const nightRoom = createRoomShell('night-room', '#536a80', '#30465a', '#263448')
+  const nightFrameMaterial = new THREE.MeshStandardMaterial({ color: '#617587', roughness: 0.8 })
+  const nightDoorMaterial = new THREE.MeshStandardMaterial({ color: '#384958', roughness: 0.9 })
+  const nightDoor = addWallFeature(
+    'night-door', 1, 2.05, nightDoorMaterial, 1.9, 1.025, 5, 0, nightRoom, nightFrameMaterial,
+  )
+  const nightHandle = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.16, 0.035), nightFrameMaterial)
+  nightHandle.position.set(-0.37, -0.02, -0.06)
+  nightDoor.add(nightHandle)
+  addCeilingLamps(nightRoom, 'night-lamp', '#4d6176', '#c4d5e0')
+  const sconceHousing = new THREE.MeshStandardMaterial({ color: '#516879', roughness: 0.8 })
+  const sconcePanel = new THREE.MeshBasicMaterial({ color: '#94aeb9' })
+  for (const x of [-3.4, 3.4]) {
+    const sconce = new THREE.Group()
+    sconce.name = 'night-wall-light'
+    sconce.position.set(x, TABLE.floorY + 2.45, 5)
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.2, 0.05), sconceHousing)
+    housing.position.z = -0.045
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.12), sconcePanel)
+    panel.position.z = -0.075
+    panel.rotation.y = Math.PI
+    const light = new THREE.PointLight('#aac9df', 3, 4, 2)
+    light.position.z = -0.4
+    sconce.add(housing, panel, light)
+    nightRoom.add(sconce)
+  }
+  const courtLineGeometry = new THREE.BufferGeometry()
+  const courtY = TABLE.floorY + 0.002
+  courtLineGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    -2.8, courtY, -4, 2.8, courtY, -4,
+    -2.8, courtY, 4, 2.8, courtY, 4,
+    -2.8, courtY, -4, -2.8, courtY, 4,
+    2.8, courtY, -4, 2.8, courtY, 4,
+  ], 3))
+  const courtLines = new THREE.LineSegments(
+    courtLineGeometry,
+    new THREE.LineBasicMaterial({ color: '#8faaba', transparent: true, opacity: 0.3, depthWrite: false }),
+  )
+  courtLines.name = 'night-court-lines'
+  nightRoom.add(courtLines)
+  scene.add(nightRoom)
+
   const setEnvironment = (environment: Environment) => {
     const bright = environment === 'bright'
     const background = bright ? '#c4d2cc' : '#0b1020'
     scene.background = new THREE.Color(background)
     scene.fog = new THREE.Fog(background, 8, 22)
     room.visible = bright
+    nightRoom.visible = !bright
     floorMaterial.color.set(bright ? '#a37b60' : '#1b2340')
     ambient.color.set(bright ? '#ffffff' : '#bcd4ff')
     ambient.groundColor.set(bright ? '#b9aa96' : '#2a2118')
