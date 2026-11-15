@@ -142,6 +142,7 @@ export function createScene(): {
   scene.add(floor)
 
   const room = new THREE.Group()
+  room.name = 'bright-room'
   const wallMaterial = new THREE.MeshStandardMaterial({ color: '#c4d2cc', roughness: 1, side: THREE.DoubleSide })
   const trimMaterial = new THREE.MeshStandardMaterial({ color: '#76978d', roughness: 1, side: THREE.DoubleSide })
   const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 4), wallMaterial)
@@ -155,7 +156,103 @@ export function createScene(): {
     wall.rotation.y = Math.PI / 2
     wall.position.set(x, TABLE.floorY + 2, 0)
     room.add(wall)
+    const trim = new THREE.Mesh(new THREE.PlaneGeometry(10, 0.85), trimMaterial)
+    trim.rotation.y = Math.PI / 2
+    trim.position.set(x - Math.sign(x) * 0.01, TABLE.floorY + 0.425, 0)
+    room.add(trim)
   }
+
+  const ceiling = new THREE.Mesh(
+    new THREE.PlaneGeometry(10, 10),
+    new THREE.MeshBasicMaterial({ color: '#c4d2cc', side: THREE.DoubleSide }),
+  )
+  ceiling.rotation.x = Math.PI / 2
+  ceiling.position.y = TABLE.floorY + 4
+  room.add(ceiling)
+
+  const frameMaterial = new THREE.MeshStandardMaterial({ color: '#d1d8d1', roughness: 0.8 })
+  const glassMaterial = new THREE.MeshStandardMaterial({ color: '#8faeb0', roughness: 0.9 })
+  const doorMaterial = new THREE.MeshStandardMaterial({ color: '#9a806d', roughness: 0.9 })
+  const handleMaterial = new THREE.MeshStandardMaterial({ color: '#d2c3a3', roughness: 0.5 })
+
+  const addWallFeature = (
+    name: string, width: number, height: number, material: THREE.Material,
+    x: number, y: number, z: number, rotation: number,
+  ) => {
+    const feature = new THREE.Group()
+    feature.name = name
+    feature.position.set(x, TABLE.floorY + y, z)
+    feature.rotation.y = rotation
+    const surface = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material)
+    surface.position.z = -0.02
+    surface.rotation.y = Math.PI
+    feature.add(surface)
+    const frameWidth = 0.07
+    const addFrame = (w: number, h: number, px: number, py: number) => {
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), frameMaterial)
+      frame.position.set(px, py, -0.06)
+      feature.add(frame)
+    }
+    for (const side of [-1, 1]) {
+      addFrame(frameWidth, height + 2 * frameWidth, side * (width + frameWidth) / 2, 0)
+      addFrame(width, frameWidth, 0, side * (height + frameWidth) / 2)
+    }
+    room.add(feature)
+    return feature
+  }
+
+  for (const x of [-3.3, 3.6]) {
+    const window = addWallFeature('room-window', 1.15, 1.05, glassMaterial, x, 2.35, 5, 0)
+    const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.045, 1.05, 0.04), frameMaterial)
+    mullion.position.z = -0.06
+    window.add(mullion)
+  }
+  for (const side of [-1, 1]) {
+    for (const z of [-1.4, 2]) {
+      const window = addWallFeature('room-window', 1.3, 1.05, glassMaterial, side * 5, 2.35, z, side * Math.PI / 2)
+      const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.045, 1.05, 0.04), frameMaterial)
+      mullion.position.z = -0.06
+      window.add(mullion)
+    }
+  }
+  const door = addWallFeature('room-door', 1, 2.05, doorMaterial, 1.9, 1.025, 5, 0)
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.16, 0.035), handleMaterial)
+  handle.position.set(-0.37, -0.02, -0.06)
+  door.add(handle)
+
+  const lampHousing = new THREE.MeshStandardMaterial({ color: '#c9d0ca', roughness: 0.8 })
+  const lampPanel = new THREE.MeshBasicMaterial({ color: '#e8e9df' })
+  for (const x of [-2, 2]) {
+    for (const z of [-1.5, 2]) {
+      const fixture = new THREE.Group()
+      fixture.name = 'room-lamp'
+      fixture.position.set(x, TABLE.floorY + 3.94, z)
+      const housing = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, 0.42), lampHousing)
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.96, 0.3), lampPanel)
+      panel.rotation.x = Math.PI / 2
+      panel.position.y = -0.041
+      fixture.add(housing, panel)
+      room.add(fixture)
+    }
+  }
+
+  const floorLines: number[] = []
+  for (let i = 0; i <= 22; i++) {
+    const x = -4.95 + i * 0.45
+    floorLines.push(x, TABLE.floorY + 0.002, -4.95, x, TABLE.floorY + 0.002, 4.95)
+    if (i === 22) continue
+    for (let z = -4.5 + (i % 2) * 0.75; z < 4.95; z += 1.5) {
+      floorLines.push(x, TABLE.floorY + 0.002, z, x + 0.45, TABLE.floorY + 0.002, z)
+    }
+  }
+  const floorLineGeometry = new THREE.BufferGeometry()
+  floorLineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(floorLines, 3))
+  const floorDetail = new THREE.LineSegments(
+    floorLineGeometry,
+    new THREE.LineBasicMaterial({ color: '#6f5344', transparent: true, opacity: 0.16, depthWrite: false }),
+  )
+  floorDetail.name = 'room-floor-detail'
+  room.add(floorDetail)
   scene.add(room)
 
   const setEnvironment = (environment: Environment) => {

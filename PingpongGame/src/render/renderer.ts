@@ -287,8 +287,8 @@ export class GameRenderer {
     this.renderer.domElement.remove()
     const textures = new Set<THREE.Texture>()
     this.scene.traverse((obj) => {
-      // 拖尾是精灵，也要一起释放（贴图挂在材质上）
-      if (obj instanceof THREE.Mesh || obj instanceof THREE.Sprite) {
+      // 拖尾是精灵，地板细节是线段，也要一起释放
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.Sprite || obj instanceof THREE.Line) {
         obj.geometry?.dispose?.()
         const material = obj.material
         const materials = Array.isArray(material) ? material : [material]

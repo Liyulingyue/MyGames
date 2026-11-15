@@ -410,13 +410,32 @@ console.log('\n=== 场馆环境切换 ===')
     const bright = background()
     const objectCount = built.scene.children.length
     const cameraPosition = built.camera.position.clone()
+    const room = built.scene.getObjectByName('bright-room')
+    const windows = room?.children.filter((child) => child.name === 'room-window') ?? []
+    const door = room?.getObjectByName('room-door')
+    const lamps = room?.children.filter((child) => child.name === 'room-lamp') ?? []
+    const floorDetail = room?.getObjectByName('room-floor-detail')
+    ok('明亮球室有墙边门窗、顶灯和地板细节',
+      !!room?.visible && windows.length === 6 && windows.every((window) =>
+        Math.abs(window.position.x) === 5 || window.position.z === 5) &&
+      !!door && door.position.z === 5 && Math.abs(door.position.x) > TABLE.halfWidth &&
+      lamps.length === 4 && !!floorDetail)
+    ok('门窗和边框位于墙面前方且不共面',
+      !!door && [...windows, door].every((feature) => {
+        const [surface, ...frames] = feature.children
+        return surface.position.z < -0.01 && frames.every((frame) =>
+          frame instanceof Mesh && frame.geometry instanceof BoxGeometry &&
+          frame.position.z + frame.geometry.parameters.depth / 2 < surface.position.z)
+      }))
     built.setEnvironment('night')
     const night = background()
     ok('默认明亮环境与夜间环境不同', bright !== night)
     ok('切换不重建场景或改变相机位置',
       built.scene.children.length === objectCount && built.camera.position.equals(cameraPosition))
+    ok('夜间隐藏球室装饰', room?.visible === false)
     built.setEnvironment('bright')
     ok('切回明亮环境恢复原背景', background() === bright)
+    ok('切回明亮环境恢复同一套球室装饰', room?.visible === true && built.scene.getObjectByName('room-door') === door)
 
     const tableParts = built.tableTop.parent!.children.filter(
       (part): part is Mesh<BoxGeometry> => part instanceof Mesh && part.geometry instanceof BoxGeometry,
