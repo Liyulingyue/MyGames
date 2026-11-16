@@ -360,20 +360,16 @@ console.log('\n=== 固定来球对比 ===')
 
 console.log('\n=== 软吸附 ===')
 {
-  function move(options: {
+  function prepareAlign(options: {
     enabled?: boolean
-    strength?: number
+    range?: number
     target?: number
     ballX?: number
-    velocityX?: number
-    velocityZ?: number
-    gap?: number
-    windowOpen?: boolean
     autoMove?: boolean
-  } = {}): { x: number; swung: boolean } {
+  } = {}): { game: PingPongGame; advance: (steps?: number) => boolean } {
     const game = new PingPongGame({
       softAlign: options.enabled ?? true,
-      softAlignStrength: options.strength ?? 0.6,
+      softAlignRange: options.range ?? 0.15,
       autoMove: options.autoMove ?? false,
       slowMotion: false,
       autoHeight: false,
@@ -383,41 +379,134 @@ console.log('\n=== 软吸附 ===')
     s.phase = 'rally'
     s.lastHitter = 'opponent'
     s.bounces = { player: 1, opponent: 0 }
-    s.playerWindowOpen = options.windowOpen ?? true
-    s.ball.pos = { x: options.ballX ?? 0.2, y: 0.6, z: PADDLE.homeZ + (options.gap ?? 0.5) }
-    s.ball.vel = { x: options.velocityX ?? 0, y: 0, z: options.velocityZ ?? -2 }
-    const target = options.target ?? 0
+    s.playerWindowOpen = true
+    const target = options.target ?? 0.1
     s.playerPaddle.x = target
     game.setPlayerTarget(target)
-    let swung = false
-    for (let i = 0; i < 30; i++) {
-      const events = game.step(FIXED_DT)
-      if (events.some((event) => event.type === 'swing')) swung = true
+    function advance(steps = 90): boolean {
+      let swung = false
+      for (let i = 0; i < steps; i++) {
+        s.ball.pos = { x: options.ballX ?? 0.2, y: 0.6, z: PADDLE.homeZ + 0.5 }
+        s.ball.vel = { x: 0, y: 0, z: -2 }
+        game.refreshPrediction()
+        if (game.step(FIXED_DT).some((event) => event.type === 'swing')) swung = true
+      }
+      return swung
     }
-    return { x: s.playerPaddle.x, swung }
+    return { game, advance }
   }
 
-  const off = move({ enabled: false })
-  const soft = move()
-  const full = move({ strength: 1 })
-  assert('关闭或强度为零时不改变玩家目标', off.x === 0 && move({ strength: 0 }).x === 0)
-  assert('接近来球时轻微引导（默认强度最多 4.8cm）', soft.x > 0.02 && soft.x <= 0.048001)
-  assert('提高强度增加引导但不超过偏差', full.x > soft.x && full.x < 0.2)
-  assert('软吸附不会替玩家挥拍', !soft.swung)
-  assert('无效来球、球远离或来球尚远时不引导',
-    move({ windowOpen: false }).x === 0 &&
-      move({ velocityZ: 2 }).x === 0 &&
-      move({ gap: 1.5 }).x === 0)
-  assert('目标远离来球时不引导', move({ target: -0.3 }).x === -0.3)
-  assert('按预测穿越点引导而不是跟踪当前球的位置',
-    move({ ballX: -0.1, velocityX: 0.6 }).x > 0)
-  assert('自动跟球优先于软吸附',
-    Math.abs(move({ autoMove: true }).x - move({ autoMove: true, enabled: false }).x) < 1e-9)
+  const off = prepareAlign({ enabled: false })
+  const zero = prepareAlign({ range: 0 })
+  off.advance()
+  zero.advance()
+  assert('关闭或范围为零时不改变玩家目标',
+    off.game.state.playerPaddle.x === 0.1 && zero.game.state.playerPaddle.x === 0.1)
 
-  const positions = [-0.3, -0.15, 0, 0.1, 0.2, 0.3, 0.45, 0.6]
-    .map((target) => move({ target, strength: 1 }).x)
-  assert('玩家持续移动时不会被吸附反向拖拽',
-    positions.every((x, index) => index === 0 || x > positions[index - 1]))
+  const near = prepareAlign({ target: 0.051 })
+  const far = prepareAlign({ target: 0.049 })
+  near.advance(1)
+  const firstStep = near.game.state.playerPaddle.x - 0.051
+  const swung = near.advance()
+  far.advance()
+  assert('范围内平滑吸附到预测击球点，范围外不吸附',
+    firstStep >= 0 && firstStep <= 4 * FIXED_DT &&
+      Math.abs(near.game.state.playerPaddle.x - 0.2) < 1e-6 &&
+      far.game.state.playerPaddle.x === 0.049)
+  assert('软吸附不会替玩家挥拍', !swung)
+  const wide = prepareAlign({ range: 0.25, target: 0 })
+  wide.advance()
+  assert('调大范围使更远的输入位置也能吸附',
+    Math.abs(wide.game.state.playerPaddle.x - 0.2) < 1e-6)
+
+  const crossing = prepareAlign({ target: 0.2, ballX: 0.6 })
+  crossing.advance()
+  const beforeEntry = crossing.game.state.playerPaddle.x
+  crossing.game.setPlayerTarget(0.46)
+  crossing.advance()
+  const afterEntry = crossing.game.state.playerPaddle.x
+  crossing.game.setPlayerTarget(0.6)
+  crossing.advance()
+  crossing.game.setPlayerTarget(0.79)
+  crossing.advance()
+  const crossed = crossing.game.state.playerPaddle.x
+  crossing.game.setPlayerTarget(0.81)
+  crossing.advance()
+  assert('60cm 击球点从 20cm 移至 80cm：进入 15cm 吸附，超过 20cm 后脱离',
+    Math.abs(beforeEntry - 0.2) < 1e-6 && Math.abs(afterEntry - 0.6) < 1e-6 &&
+      Math.abs(crossed - 0.6) < 1e-6 && Math.abs(crossing.game.state.playerPaddle.x - 0.81) < 1e-6)
+
+  const hysteresis = prepareAlign({ target: 0.06 })
+  hysteresis.advance()
+  hysteresis.game.setPlayerTarget(0.03)
+  hysteresis.advance()
+  const retained = hysteresis.game.state.playerPaddle.x
+  hysteresis.game.setPlayerTarget(-0.01)
+  hysteresis.advance()
+  const released = hysteresis.game.state.playerPaddle.x
+  hysteresis.game.setPlayerTarget(0.04)
+  hysteresis.advance()
+  const outsideEntry = hysteresis.game.state.playerPaddle.x
+  hysteresis.game.setPlayerTarget(0.06)
+  hysteresis.advance()
+  assert('退出范围比进入范围大 5cm，解除后须重新进入才吸附',
+    Math.abs(retained - 0.2) < 1e-6 && Math.abs(released + 0.01) < 1e-6 &&
+      Math.abs(outsideEntry - 0.04) < 1e-6 &&
+      Math.abs(hysteresis.game.state.playerPaddle.x - 0.2) < 1e-6)
+
+  const reverse = prepareAlign({ target: 0.06 })
+  reverse.advance()
+  reverse.game.setPlayerTarget(0.12)
+  reverse.advance()
+  reverse.game.setPlayerTarget(0.065)
+  reverse.advance()
+  const reversed = reverse.game.state.playerPaddle.x
+  reverse.advance()
+  const stillReleased = reverse.game.state.playerPaddle.x
+  reverse.game.setPlayerTarget(0.04)
+  reverse.advance()
+  reverse.game.setPlayerTarget(0.06)
+  reverse.advance()
+  assert('明显反向移动可主动脱离，离开后重新进入才能再次吸附',
+    Math.abs(reversed - 0.065) < 1e-6 && Math.abs(stillReleased - 0.065) < 1e-6 &&
+      Math.abs(reverse.game.state.playerPaddle.x - 0.2) < 1e-6)
+
+  const reverseRight = prepareAlign({ target: 0.34 })
+  reverseRight.advance()
+  reverseRight.game.setPlayerTarget(0.28)
+  reverseRight.advance()
+  reverseRight.game.setPlayerTarget(0.335)
+  reverseRight.advance()
+  assert('从另一侧接近时反向脱离同样生效',
+    Math.abs(reverseRight.game.state.playerPaddle.x - 0.335) < 1e-6)
+
+  const settings = prepareAlign({ target: 0.06 })
+  settings.advance()
+  settings.game.options.softAlignRange = 0.05
+  settings.advance()
+  const narrowed = settings.game.state.playerPaddle.x
+  settings.game.options.softAlignRange = 0.15
+  settings.advance()
+  const widened = settings.game.state.playerPaddle.x
+  settings.game.options.softAlign = false
+  settings.advance()
+  assert('对局中修改范围或关闭吸附立即生效',
+    Math.abs(narrowed - 0.06) < 1e-6 && Math.abs(widened - 0.2) < 1e-6 &&
+      Math.abs(settings.game.state.playerPaddle.x - 0.06) < 1e-6)
+
+  const invalid = prepareAlign()
+  invalid.advance()
+  invalid.game.state.ball.vel.z = 2
+  invalid.game.refreshPrediction()
+  for (let i = 0; i < 30; i++) invalid.game.step(FIXED_DT)
+  assert('无效来球立即解除吸附', Math.abs(invalid.game.state.playerPaddle.x - 0.1) < 1e-6)
+
+  const auto = prepareAlign({ autoMove: true })
+  const autoOff = prepareAlign({ autoMove: true, enabled: false })
+  auto.advance()
+  autoOff.advance()
+  assert('自动跟球优先于软吸附',
+    Math.abs(auto.game.state.playerPaddle.x - autoOff.game.state.playerPaddle.x) < 1e-9)
 }
 
 console.log('\n=== 提前预测软吸附 ===')
@@ -443,7 +532,7 @@ console.log('\n=== 提前预测软吸附 ===')
   assert('落台前已准确预测过网、反弹后的拍面穿越点',
     prediction !== null && crossingX !== null && Math.abs(prediction - crossingX) < 1e-9)
 
-  const target = (prediction ?? 0) - 0.2
+  const target = (prediction ?? 0) - 0.1
   function prepare(
     ball: Ball,
     bounced: boolean,
@@ -474,19 +563,17 @@ console.log('\n=== 提前预测软吸附 ===')
     if (events.some((event) => event.type === 'swing')) swung = true
   }
   const earlyOffset = early.state.playerPaddle.x - target
-  assert('对手击球后、我方落台前显示预测并轻柔引导',
+  assert('对手击球后、我方落台前显示预测并吸附',
     !early.state.playerWindowOpen && early.state.predictionTargetX !== null && earlyOffset > 0 && !swung)
   if (afterBounce) {
     const late = prepare(afterBounce, true)
     for (let i = 0; i < 3; i++) late.step(FIXED_DT)
     const initialOffset = late.state.playerPaddle.x - target
-    for (let i = 0; i < 15; i++) late.step(FIXED_DT)
-    assert('落台时引导平滑过渡，没有立即跳到最大强度',
+    for (let i = 0; i < 6; i++) late.step(FIXED_DT)
+    assert('落台后的吸附也平滑进入',
       initialOffset > 0 && initialOffset < late.state.playerPaddle.x - target)
-    assert('落台后引导逐渐加强', late.state.playerPaddle.x - target > earlyOffset)
   } else {
-    assert('落台时引导平滑过渡，没有立即跳到最大强度', false, '测试轨迹未落台')
-    assert('落台后引导逐渐加强', false, '测试轨迹未落台')
+    assert('落台后的吸附也平滑进入', false, '测试轨迹未落台')
   }
 
   const net: Ball = { pos: { x: 0, y: 0.1, z: 0.1 }, vel: { x: 0, y: -1, z: -3 }, spin: 0 }

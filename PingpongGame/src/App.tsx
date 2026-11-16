@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { PingPongGame } from './core/game.ts'
+import { ALIGN_DEFAULT_RANGE, PingPongGame } from './core/game.ts'
 import type { RulesMode } from './core/game.ts'
 import { AI_PRESETS, HIT_JUDGMENT_PRESETS, PADDLE, PLAYER, TARGET_SCORE } from './core/constants.ts'
 import type { HitJudgment } from './core/constants.ts'
@@ -190,7 +190,7 @@ export default function App() {
   const [hitJudgment, setHitJudgment] = useState<HitJudgment>('standard')
   const [predictionAssist, setPredictionAssist] = useState(false)
   const [softAlign, setSoftAlign] = useState(false)
-  const [softAlignStrength, setSoftAlignStrength] = useState(0.6)
+  const [softAlignRange, setSoftAlignRange] = useState(ALIGN_DEFAULT_RANGE)
   /**
    * 体感模式下怎么击球。
    *
@@ -265,7 +265,7 @@ export default function App() {
   const hitJudgmentRef = useRef(hitJudgment)
   const predictionAssistRef = useRef(predictionAssist)
   const softAlignRef = useRef(softAlign)
-  const softAlignStrengthRef = useRef(softAlignStrength)
+  const softAlignRangeRef = useRef(softAlignRange)
   const swingSourceRef = useRef(swingSource)
   /** 取景设置：新开一局时新建的渲染器要沿用当前设置 */
   const displaySizeRef = useRef(displaySize)
@@ -289,7 +289,7 @@ export default function App() {
   hitJudgmentRef.current = hitJudgment
   predictionAssistRef.current = predictionAssist
   softAlignRef.current = softAlign
-  softAlignStrengthRef.current = softAlignStrength
+  softAlignRangeRef.current = softAlignRange
   swingSourceRef.current = swingSource
   pausedRef.current = showSettings
   environmentRef.current = environment
@@ -558,7 +558,7 @@ export default function App() {
       hitJudgment: hitJudgmentRef.current,
       predictionAssist: predictionAssistRef.current,
       softAlign: softAlignRef.current,
-      softAlignStrength: softAlignStrengthRef.current,
+      softAlignRange: softAlignRangeRef.current,
     })
     gameRef.current = game
     game.start()
@@ -1119,13 +1119,13 @@ export default function App() {
     game.options.hitJudgment = hitJudgment
     game.options.predictionAssist = predictionAssist
     game.options.softAlign = softAlign
-    game.options.softAlignStrength = softAlignStrength
+    game.options.softAlignRange = softAlignRange
     game.refreshPrediction()
     if (pausedRef.current && rendererRef.current) {
       rendererRef.current.sync(game.state)
       rendererRef.current.render()
     }
-  }, [timeScale, autoMove, autoSwing, hitJudgment, predictionAssist, softAlign, softAlignStrength])
+  }, [timeScale, autoMove, autoSwing, hitJudgment, predictionAssist, softAlign, softAlignRange])
 
   // 显示尺寸实时生效（只动相机，物理完全不受影响）
   useEffect(() => {
@@ -1327,7 +1327,7 @@ export default function App() {
               <span>球速：{timeScale.toFixed(2)}x</span>
               <span>击球判定：{HIT_JUDGMENT_LABELS[hitJudgment]}</span>
               <span>辅助预测：{predictionAssist ? '开' : '关'}</span>
-              <span>软吸附：{softAlign ? autoMove ? '自动跟球优先' : `${Math.round(softAlignStrength * 100)}%` : '关'}</span>
+              <span>软吸附：{softAlign ? autoMove ? '自动跟球优先' : `${Math.round(softAlignRange * 100)}cm` : '关'}</span>
               <span>音效：{soundOn ? `${Math.round(soundVolume * 100)}%` : '关闭'}</span>
               <p>静态预览不模拟对局；操作、球速和辅助效果需开始游戏体验。</p>
               {inputMode === 'pose' && <p>摄像头：{hud.cameraState === 'ready' ? '已就绪' : hud.cameraState === 'loading' ? '正在准备' : '未就绪'}</p>}
@@ -1812,23 +1812,23 @@ export default function App() {
                   />
                 </label>
                 <div className="setting-hint">
-                  接近预测位置时轻微引导，落台后逐渐加强。仍需自己移动和挥拍；辅助移动开启时优先自动跟球。
+                  输入位置进入范围后平滑吸附到预测击球点，移出范围或反向移动可脱离。仍需自己挥拍；辅助移动开启时优先自动跟球。
                 </div>
                 <div className="setting">
                   <div className="setting-label">
-                    <span>软吸附强度</span>
-                    <b>{Math.round(softAlignStrength * 100)}%</b>
+                    <span>软吸附范围</span>
+                    <b>{Math.round(softAlignRange * 100)}cm</b>
                   </div>
                   <Slider
-                    min={0}
-                    max={1}
-                    step={0.1}
-                    value={softAlignStrength}
-                    defaultValue={0.6}
-                    ariaLabel="软吸附强度"
-                    onChange={setSoftAlignStrength}
+                    min={0.05}
+                    max={0.4}
+                    step={0.01}
+                    value={softAlignRange}
+                    defaultValue={ALIGN_DEFAULT_RANGE}
+                    ariaLabel="软吸附范围"
+                    onChange={setSoftAlignRange}
                   />
-                  <div className="setting-hint">开启软吸附后生效；0% 不产生引导。</div>
+                  <div className="setting-hint">范围以玩家输入位置到预测击球点的横向距离计算；退出范围比进入范围大 5cm，避免边界抖动。</div>
                 </div>
 
                 <label className="setting switch">

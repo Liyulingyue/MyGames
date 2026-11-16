@@ -25,6 +25,11 @@ import { clamp, createRng, lerp, rand } from './vec3.ts'
 
 export type RulesMode = 'casual' | 'standard'
 
+export const ALIGN_DEFAULT_RANGE = 0.15
+const ALIGN_EXIT_MARGIN = 0.05
+const ALIGN_REVERSE_DISTANCE = 0.05
+const ALIGN_BLEND_TIME = 0.12
+
 export interface GameOptions {
   /** 随机数种子，固定后整局可复现 */
   seed?: number
@@ -71,9 +76,9 @@ export interface GameOptions {
   hitJudgment?: HitJudgment
   /** 显示预测击球位置，不影响球拍移动 */
   predictionAssist?: boolean
-  /** 仅在目标靠近来球时轻微引导球拍，强度为 0～1 */
+  /** 输入位置进入预测击球点附近时吸附；范围单位为米 */
   softAlign?: boolean
-  softAlignStrength?: number
+  softAlignRange?: number
 }
 
 export interface GameState {
@@ -131,7 +136,11 @@ export class PingPongGame {
   private serveTouchedNet = false
   private predictionTimer = 0
   private interceptX: number | null = null
-  private playerBounceAge = 0
+  private alignLocked = false
+  private alignBlocked = false
+  private alignBlend = 0
+  private alignEntrySide = 0
+  private alignFurthestInput = 0
   private activeHitJudgment: HitJudgment = 'standard'
 
   constructor(options: GameOptions = {}) {
@@ -153,7 +162,7 @@ export class PingPongGame {
       hitJudgment: options.hitJudgment ?? 'standard',
       predictionAssist: options.predictionAssist ?? false,
       softAlign: options.softAlign ?? false,
-      softAlignStrength: options.softAlignStrength ?? 0.6,
+      softAlignRange: options.softAlignRange ?? ALIGN_DEFAULT_RANGE,
     }
 
     this.rng = createRng(this.options.seed)
@@ -225,7 +234,7 @@ export class PingPongGame {
     this.state.predictionTargetX = null
     this.interceptX = null
     this.predictionTimer = 0
-    this.playerBounceAge = 0
+    this.resetAlign()
 
     this.beginServe()
   }
@@ -236,6 +245,7 @@ export class PingPongGame {
     this.state.predictionTargetX = null
     this.interceptX = null
     this.predictionTimer = 0
+    this.resetAlign()
   }
 
   /** 设置变化时刷新预测，包括比赛暂停期间。 */
@@ -338,8 +348,6 @@ export class PingPongGame {
 
     s.elapsed += dt
     s.opponentPaddle.swingAnim = Math.max(0, s.opponentPaddle.swingAnim - dt * 3.2)
-    this.playerBounceAge = s.playerWindowOpen ? this.playerBounceAge + dt : 0
-
     // 球拍始终跟随输入：得分停顿期间也继续更新，
     // 否则目标会在这段时间里漂移，恢复回合时球拍瞬移一下。
     this.updatePlayerPaddle(dt)
@@ -530,27 +538,57 @@ export class PingPongGame {
     return clamp(b.pos.y, PADDLE.minY, PADDLE.maxY)
   }
 
+  private resetAlign(): void {
+    this.alignLocked = false
+    this.alignBlocked = false
+    this.alignBlend = 0
+    this.alignEntrySide = 0
+    this.alignFurthestInput = this.playerTargetX
+  }
+
   /**
-   * 球拍的目标横向位置。
-   *
-   * 辅助移动开启时直接贴着球走：玩家完全不用管走位，只要在对的时机挥拍。
-   * 球不在来路上时保持玩家自己设定的位置。
+   * 辅助移动时直接跟球，否则按玩家位置和预测击球点计算吸附目标。
    */
-  private targetPaddleX(): number {
+  private targetPaddleX(dt: number): number {
     if (!this.options.autoMove) {
       const s = this.state
       const b = s.ball
       if (!this.options.softAlign || s.phase !== 'rally' || s.lastHitter !== 'opponent' ||
-          b.vel.z >= -1e-4 || b.pos.z < PADDLE.homeZ || this.interceptX === null) return this.playerTargetX
+          b.vel.z >= -1e-4 || b.pos.z < PADDLE.homeZ || this.interceptX === null ||
+          this.options.softAlignRange <= 0) {
+        this.resetAlign()
+        return this.playerTargetX
+      }
 
-      const eta = (PADDLE.homeZ - b.pos.z) / b.vel.z
-      const delta = this.interceptX - this.playerTargetX
-      const distanceWeight = Math.max(0, 1 - Math.abs(delta) / 0.4)
-      const bounceBlend = clamp(this.playerBounceAge / 0.12, 0, 1)
-      const timeWeight = 0.35 + 0.65 * bounceBlend * clamp((0.6 - eta) / 0.3, 0, 1)
-      const strength = clamp(this.options.softAlignStrength, 0, 1) * 0.8
-      return clamp(this.playerTargetX + delta * distanceWeight * timeWeight * strength, -PADDLE.rangeX, PADDLE.rangeX)
+      const intercept = clamp(this.interceptX, -PADDLE.rangeX, PADDLE.rangeX)
+      const distance = Math.abs(intercept - this.playerTargetX)
+      const range = this.options.softAlignRange
+      if (this.alignBlocked && distance > range) this.alignBlocked = false
+      if (this.alignLocked) {
+        if (this.alignEntrySide !== 0) {
+          // 记录玩家朝击球点移动的最远位置，识别回到进入侧的主动反向。
+          if (this.alignEntrySide * this.playerTargetX < this.alignEntrySide * this.alignFurthestInput) {
+            this.alignFurthestInput = this.playerTargetX
+          }
+          const reversed = this.alignEntrySide * (this.playerTargetX - this.alignFurthestInput)
+          if (reversed >= ALIGN_REVERSE_DISTANCE &&
+              this.alignEntrySide * (this.playerTargetX - intercept) > 0) {
+            this.alignLocked = false
+            this.alignBlocked = true
+          }
+        }
+        if (distance > range + ALIGN_EXIT_MARGIN) this.alignLocked = false
+      } else if (!this.alignBlocked && distance <= range) {
+        this.alignLocked = true
+        this.alignEntrySide = Math.sign(this.playerTargetX - intercept)
+        this.alignFurthestInput = this.playerTargetX
+      }
+      this.alignBlend = clamp(
+        this.alignBlend + (this.alignLocked ? 1 : -1) * dt / ALIGN_BLEND_TIME, 0, 1,
+      )
+      return lerp(this.playerTargetX, intercept, this.alignBlend)
     }
+    this.resetAlign()
     const b = this.state.ball
     if (b.vel.z >= 0 || b.pos.z < PADDLE.homeZ - 0.35) return this.playerTargetX
     return clamp(b.pos.x, -PADDLE.rangeX, PADDLE.rangeX)
@@ -563,7 +601,7 @@ export class PingPongGame {
     const prevY = p.y
 
     const maxSpeed = 4.0
-    const targetX = this.targetPaddleX()
+    const targetX = this.targetPaddleX(dt)
     const dx = targetX - p.x
     const dy = this.autoPaddleHeight() - p.y
     const d = Math.hypot(dx, dy)
@@ -770,7 +808,7 @@ export class PingPongGame {
     s.predictionTargetX = null
     this.interceptX = null
     this.predictionTimer = 0
-    this.playerBounceAge = 0
+    this.resetAlign()
     s.rallyHits = 0
 
     // 重置 AI 的锁定状态，让它重新预判这一次发球
