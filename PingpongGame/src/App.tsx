@@ -660,10 +660,15 @@ export default function App() {
     let lastFreshFrame = performance.now()
     let wasGameOver = false
     let gestureKey = ''
+    let timingGuideStartEta: number | null = null
     const resultControl = new ResultGesture()
 
     const hideTimingGuide = () => {
-      if (timingGuideElementRef.current) timingGuideElementRef.current.dataset.phase = 'hidden'
+      timingGuideStartEta = null
+      if (timingGuideElementRef.current) {
+        timingGuideElementRef.current.dataset.phase = 'hidden'
+        timingGuideElementRef.current.style.color = ''
+      }
     }
 
     const updateTimingGuide = () => {
@@ -693,8 +698,8 @@ export default function App() {
         phase === 'swing' ? '挥拍！' : phase === 'ready' ? '准备挥拍' : '来球'
       element.dataset.phase = phase
       element.setAttribute('aria-label', `击球提示：${text}；波峰为预测位置，菱形为球拍位置`)
-      const swingEta = HIT_JUDGMENT_PRESETS[game.options.hitJudgment].swingTime * 0.8
-      const { color, width } = timingGuideStyle(eta, swingEta, game.shouldSwing)
+      if (timingGuideStartEta === null) timingGuideStartEta = eta
+      const { color, width } = timingGuideStyle(eta, timingGuideStartEta, game.shouldSwing)
       element.style.color = color
       target.style.left = `${Math.max(0, Math.min(1, targetX)) * 100}%`
       target.dataset.edge = targetX < 0 ? 'left' : targetX > 1 ? 'right' : ''

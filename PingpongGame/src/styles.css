@@ -99,7 +99,7 @@ body {
   height: 92px;
   pointer-events: none;
   color: #4dd4ff;
-  transition: opacity 0.12s ease, color 0.12s linear;
+  transition: opacity 0.12s ease;
 }
 
 .timing-guide[data-phase='hidden'] {
@@ -117,9 +117,9 @@ body {
 
 .timing-guide path {
   fill: currentColor;
-  fill-opacity: 0.2;
+  fill-opacity: 0.4;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke-width: 3;
   vector-effect: non-scaling-stroke;
 }
 

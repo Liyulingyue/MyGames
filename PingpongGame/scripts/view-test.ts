@@ -45,19 +45,24 @@ function approx(label: string, actual: number, expected: number, tol: number): v
 
 console.log('=== 击球提示带 ===')
 {
-  const far = timingGuideStyle(1.15, 0.24, false)
-  const middle = timingGuideStyle(0.85, 0.24, false)
-  const near = timingGuideStyle(0.55, 0.24, false)
-  const blocked = timingGuideStyle(0.2, 0.24, false)
-  const swing = timingGuideStyle(0.2, 0.24, true)
-  ok('来球接近时颜色连续变化、波形逐渐收窄',
+  const far = timingGuideStyle(0.4, 0.4, false)
+  const middle = timingGuideStyle(0.3, 0.4, false)
+  const near = timingGuideStyle(0.2, 0.4, false)
+  const blocked = timingGuideStyle(0.1, 0.4, false)
+  const swing = timingGuideStyle(0.1, 0.4, true)
+  ok('提示仅剩 0.4 秒时也有明显渐变和收窄',
     far.color !== middle.color && middle.color !== near.color &&
-    far.width > middle.width && middle.width > near.width && near.width > swing.width)
+    far.width > middle.width && middle.width > near.width && near.width > swing.width &&
+    far.width >= 2 * swing.width)
   ok('接近球拍但未进入挥拍窗口时不变绿',
-    blocked.color === near.color && blocked.color !== swing.color)
+    blocked.color !== swing.color)
+  ok('不同出现时刻按各自的剩余时间开始渐变',
+    timingGuideStyle(0.8, 0.8, false).color === far.color &&
+    timingGuideStyle(0.4, 0.8, false).width === near.width)
   ok('时间超出范围时波形宽度保持有界',
-    timingGuideStyle(10, 0.24, false).width === far.width &&
-    timingGuideStyle(0, 0.24, true).width === swing.width)
+    timingGuideStyle(10, 0.4, false).width === far.width &&
+    timingGuideStyle(0, 0.4, true).width > 0 &&
+    timingGuideStyle(0, 0.4, true).width < swing.width)
 }
 
 /** 视点基：和 Three.js 的 lookAt 一致（z 轴指向相机后方） */
