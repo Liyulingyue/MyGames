@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { PingPongGame } from './core/game.ts'
+import { PADDLE } from './core/constants.ts'
 import type { GameRenderer } from './render/renderer.ts'
 import type { Environment } from './render/scene.ts'
 import type { CameraPose } from './render/view.ts'
@@ -12,6 +13,8 @@ interface PreviewSettings {
   cameraPose: CameraPose
 }
 
+const PREVIEW_TARGET_X = 0.12
+
 export function SettingsPreview({
   environment,
   displaySize,
@@ -19,7 +22,17 @@ export function SettingsPreview({
   aspect,
   timingGuide,
   timingGuideHeight,
-}: PreviewSettings & { aspect: number; timingGuide: boolean; timingGuideHeight: number }) {
+  softAlign,
+  softAlignRange,
+  autoMove,
+}: PreviewSettings & {
+  aspect: number
+  timingGuide: boolean
+  timingGuideHeight: number
+  softAlign: boolean
+  softAlignRange: number
+  autoMove: boolean
+}) {
   const frameRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<GameRenderer | null>(null)
@@ -28,6 +41,9 @@ export function SettingsPreview({
   const [loading, setLoading] = useState(true)
   const [attempt, setAttempt] = useState(0)
   const [previewSize, setPreviewSize] = useState({ width: 0, height: 0, scale: 0 })
+  const [projection, setProjection] = useState<{
+    target: number; paddle: number; left: number; right: number
+  } | null>(null)
 
   settingsRef.current = { environment, displaySize, cameraPose }
 
@@ -95,12 +111,19 @@ export function SettingsPreview({
     renderer.setDisplaySize(displaySize)
     renderer.setCameraPose(cameraPose)
     renderer.render()
-  }, [environment, displaySize, cameraPose])
+    const target = renderer.projectPaddleX(PREVIEW_TARGET_X, PADDLE.homeY)
+    const paddle = renderer.projectPaddleX(0, PADDLE.homeY)
+    const start = renderer.projectPaddleX(Math.max(-PADDLE.rangeX, PREVIEW_TARGET_X - softAlignRange), PADDLE.homeY)
+    const end = renderer.projectPaddleX(Math.min(PADDLE.rangeX, PREVIEW_TARGET_X + softAlignRange), PADDLE.homeY)
+    setProjection(target !== null && paddle !== null && start !== null && end !== null
+      ? { target, paddle, left: Math.min(start, end), right: Math.max(start, end) }
+      : null)
+  }, [environment, displaySize, cameraPose, softAlignRange, previewSize, loading])
 
   return (
     <div className="settings-preview-frame" ref={frameRef} style={{ '--screen-aspect': aspect } as CSSProperties}>
       <div className="settings-preview-canvas" ref={hostRef} aria-label="球台画面预览" />
-      {timingGuide && previewSize.scale > 0 && (
+      {(timingGuide || (softAlign && !autoMove)) && projection && previewSize.scale > 0 && (
         <div
           className="settings-preview-guide"
           style={{
@@ -110,8 +133,34 @@ export function SettingsPreview({
             '--timing-wave-height': `${TIMING_WAVE_HEIGHT * timingGuideHeight}px`,
           } as CSSProperties}
         >
-          <TimingGuide preview />
+          {timingGuide && <TimingGuide preview previewTargetX={projection.target} previewPaddleX={projection.paddle} />}
+          {softAlign && !autoMove && projection.right > 0 && projection.left < 1 && (
+            <>
+              <div
+                className="soft-align-preview"
+                role="img"
+                aria-label={`软吸附进入范围示例，目标两侧各 ${Math.round(softAlignRange * 100)} 厘米`}
+                style={{
+                  left: `${Math.max(0, projection.left) * 100}%`,
+                  width: `${(Math.min(1, projection.right) - Math.max(0, projection.left)) * 100}%`,
+                }}
+              />
+              {projection.target >= 0 && projection.target <= 1 && (
+                <div className="soft-align-preview-target" style={{ left: `${projection.target * 100}%` }} aria-hidden="true" />
+              )}
+            </>
+          )}
         </div>
+      )}
+      {!loading && !error && !projection && (timingGuide || (softAlign && !autoMove)) && (
+        <div className="settings-preview-unavailable" role="status">球拍平面出画，无法显示辅助示例</div>
+      )}
+      {!loading && !error && projection && softAlign && !autoMove && (projection.right <= 0 || projection.left >= 1) && (
+        <div className="settings-preview-unavailable" role="status">吸附示例范围在画外</div>
+      )}
+      {!loading && !error && projection && softAlign && !autoMove &&
+        projection.right > 0 && projection.left < 1 && (projection.left < 0 || projection.right > 1) && (
+        <div className="settings-preview-unavailable" role="status">部分吸附示例范围在画外</div>
       )}
       {loading && <div className="settings-preview-message" role="status">正在加载画面预览…</div>}
       {error && (

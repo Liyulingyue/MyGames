@@ -1384,6 +1384,9 @@ export default function App() {
               aspect={viewAspect}
               timingGuide={timingGuide}
               timingGuideHeight={timingGuideHeight}
+              softAlign={softAlign}
+              softAlignRange={softAlignRange}
+              autoMove={autoMove}
             />
             <div className="settings-preview-summary" aria-live="polite">
               <span>{inputMode === 'pose' ? '体感' : inputMode === 'mouse' ? '鼠标' : '键盘'}操作</span>
@@ -1393,7 +1396,12 @@ export default function App() {
               <span>击球提示带：{timingGuide ? `${timingGuideHeight.toFixed(1)}x` : '关'}</span>
               <span>软吸附：{softAlign ? autoMove ? '自动跟球优先' : `${Math.round(softAlignRange * 100)}cm` : '关'}</span>
               <span>音效：{soundOn ? `${Math.round(soundVolume * 100)}%` : '关闭'}</span>
-              <p>提示带为静态示例；操作、球速和实际辅助效果需开始游戏体验。</p>
+              <p>
+                {softAlign && !autoMove
+                  ? '紫色为吸附进入范围，白线为示例目标。'
+                  : ''}
+                提示带和吸附范围均为静态示例；实际辅助效果需开始游戏体验。
+              </p>
               {inputMode === 'pose' && <p>摄像头：{hud.cameraState === 'ready' ? '已就绪' : hud.cameraState === 'loading' ? '正在准备' : '未就绪'}</p>}
               {bootError && <p className="start-error" role="alert">{bootError}</p>}
               {booting && <LoadProgressBar progress={loadProgress} />}
