@@ -1564,18 +1564,6 @@ export default function App() {
             </div>
           </div>
 
-          <div className={`hints glass ${inputMode === 'pose' ? 'pose-hints' : ''}`}>
-            {inputMode === 'pose' ? (
-              <>左右移动身体调整球拍 · 上下快速挥动手腕击球</>
-            ) : inputMode === 'mouse' ? (
-              <>移动鼠标调整球拍 · 点击左键挥拍</>
-            ) : (
-              <>
-                <kbd>←</kbd>
-                <kbd>→</kbd> 左右 · <kbd>空格</kbd> 挥拍
-              </>
-            )}
-          </div>
           </>
         )}
 
@@ -1658,6 +1646,15 @@ export default function App() {
                     >
                       键盘
                     </button>
+                  </div>
+                  <div className="setting-hint">
+                    {inputMode === 'pose'
+                      ? isMouseSwing(swingSource)
+                        ? '左右移动身体调整球拍，点击鼠标左键挥拍。'
+                        : '左右移动身体调整球拍，快速挥动手腕击球。'
+                      : inputMode === 'mouse'
+                        ? '移动鼠标调整球拍，点击左键挥拍。'
+                        : '按 ← / → 或 A / D 调整球拍，按空格挥拍。'}
                   </div>
                 </div>
 

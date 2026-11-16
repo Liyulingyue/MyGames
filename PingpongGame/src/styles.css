@@ -187,10 +187,6 @@ body {
   bottom: 100px;
 }
 
-.hud.guidance-on .hints {
-  bottom: 96px;
-}
-
 /* ---------------- 比分牌 ---------------- */
 
 .scoreboard {
@@ -531,34 +527,6 @@ body {
   font-size: 11px;
   color: var(--muted);
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
-}
-
-/* ---------------- 底部操作提示 ---------------- */
-
-.hints {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 8px 18px;
-  /* 提示条是胶囊形，覆盖 .glass 的圆角 */
-  border-radius: var(--radius-pill);
-  font-size: 13px;
-  color: var(--muted);
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.hints kbd {
-  display: inline-block;
-  padding: 1px 7px;
-  margin: 0 2px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 12px;
 }
 
 /* ---------------- 本局结束 ---------------- */
@@ -1551,25 +1519,12 @@ input[type='range']:active::-webkit-slider-thumb {
     padding: 8px 10px;
   }
 
-  .hints {
-    font-size: 11px;
-    padding: 6px 12px;
-  }
-
   .camera-preview {
     width: 160px;
   }
 
   .camera-preview.compact {
     display: none;
-  }
-
-  .hints.pose-hints {
-    bottom: 150px;
-  }
-
-  .hud.guidance-on .hints.pose-hints {
-    bottom: 232px;
   }
 
   .settings {
