@@ -30,6 +30,7 @@ import { createScene } from '../src/render/scene.ts'
 import { createOpponent } from '../src/render/opponent.ts'
 import { applyPaddleTransform, createPaddle } from '../src/render/meshes.ts'
 import { PingPongGame } from '../src/core/game.ts'
+import { timingGuideStyle } from '../src/render/timingGuide.ts'
 
 let failures = 0
 
@@ -40,6 +41,23 @@ function ok(label: string, pass: boolean, detail = ''): void {
 
 function approx(label: string, actual: number, expected: number, tol: number): void {
   ok(label, Math.abs(actual - expected) <= tol, `${actual.toFixed(5)}（期望 ${expected.toFixed(5)}）`)
+}
+
+console.log('=== 击球提示带 ===')
+{
+  const far = timingGuideStyle(1.15, 0.24, false)
+  const middle = timingGuideStyle(0.85, 0.24, false)
+  const near = timingGuideStyle(0.55, 0.24, false)
+  const blocked = timingGuideStyle(0.2, 0.24, false)
+  const swing = timingGuideStyle(0.2, 0.24, true)
+  ok('来球接近时颜色连续变化、波形逐渐收窄',
+    far.color !== middle.color && middle.color !== near.color &&
+    far.width > middle.width && middle.width > near.width && near.width > swing.width)
+  ok('接近球拍但未进入挥拍窗口时不变绿',
+    blocked.color === near.color && blocked.color !== swing.color)
+  ok('时间超出范围时波形宽度保持有界',
+    timingGuideStyle(10, 0.24, false).width === far.width &&
+    timingGuideStyle(0, 0.24, true).width === swing.width)
 }
 
 /** 视点基：和 Three.js 的 lookAt 一致（z 轴指向相机后方） */

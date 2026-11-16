@@ -92,28 +92,19 @@ body {
 /* ---------------- 击球提示带 ---------------- */
 
 .timing-guide {
-  --guide-color: #4dd4ff;
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   height: 92px;
   pointer-events: none;
-  color: var(--guide-color);
-  transition: opacity 0.12s ease;
+  color: #4dd4ff;
+  transition: opacity 0.12s ease, color 0.12s linear;
 }
 
 .timing-guide[data-phase='hidden'] {
   opacity: 0;
   visibility: hidden;
-}
-
-.timing-guide[data-phase='ready'] {
-  --guide-color: #ffb454;
-}
-
-.timing-guide[data-phase='swing'] {
-  --guide-color: #58e08a;
 }
 
 .timing-guide svg {
@@ -125,9 +116,9 @@ body {
 }
 
 .timing-guide path {
-  fill: var(--guide-color);
+  fill: currentColor;
   fill-opacity: 0.2;
-  stroke: var(--guide-color);
+  stroke: currentColor;
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
@@ -143,7 +134,7 @@ body {
 
 .timing-target {
   top: 20px;
-  color: var(--guide-color);
+  color: inherit;
 }
 
 .timing-paddle {
@@ -167,20 +158,6 @@ body {
 .timing-target[data-edge='right'],
 .timing-paddle[data-edge='right'] {
   transform: translateX(-100%);
-}
-
-.timing-label {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  transform: translateX(-50%);
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  background: rgba(7, 11, 22, 0.8);
-  color: var(--guide-color);
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
 }
 
 .hud.guidance-on .camera-preview {

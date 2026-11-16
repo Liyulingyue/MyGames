@@ -7,6 +7,7 @@ import type { Phase, Side } from './core/types.ts'
 import type { GameRenderer } from './render/renderer.ts'
 import type { Environment } from './render/scene.ts'
 import { CAMERA_LIMITS, DEFAULT_CAMERA, VIEW, checkFrame, type CameraPose } from './render/view.ts'
+import { timingGuideStyle } from './render/timingGuide.ts'
 import { PoseTracker, isVisible } from './input/poseTracker.ts'
 import type { MotionSource, PoseFrame, PoseLoadProgress } from './input/poseTracker.ts'
 import { SwingDetector, paddleTargetFromPose, pickArmSample, handOf, isMouseSwing } from './input/swingDetector.ts'
@@ -236,7 +237,6 @@ export default function App() {
   const timingWaveRef = useRef<SVGPathElement>(null)
   const timingTargetRef = useRef<HTMLDivElement>(null)
   const timingPaddleRef = useRef<HTMLDivElement>(null)
-  const timingLabelRef = useRef<HTMLSpanElement>(null)
   /** 结算页的「再来一局」按钮：结算后自动聚焦，回车直接能重开 */
   const restartBtnRef = useRef<HTMLButtonElement>(null)
   const retryCameraBtnRef = useRef<HTMLButtonElement>(null)
@@ -671,11 +671,10 @@ export default function App() {
       const wave = timingWaveRef.current
       const target = timingTargetRef.current
       const paddle = timingPaddleRef.current
-      const label = timingLabelRef.current
       const intercept = game.predictedInterceptX
       const eta = game.timeToPaddle
       const state = game.state
-      if (!element || !wave || !target || !paddle || !label) return
+      if (!element || !wave || !target || !paddle) return
       if (!timingGuideRef.current || state.phase !== 'rally' || state.lastHitter !== 'opponent' ||
           intercept === null || eta === null) {
         hideTimingGuide()
@@ -694,9 +693,13 @@ export default function App() {
         phase === 'swing' ? '挥拍！' : phase === 'ready' ? '准备挥拍' : '来球'
       element.dataset.phase = phase
       element.setAttribute('aria-label', `击球提示：${text}；波峰为预测位置，菱形为球拍位置`)
-      label.textContent = text
+      const swingEta = HIT_JUDGMENT_PRESETS[game.options.hitJudgment].swingTime * 0.8
+      const { color, width } = timingGuideStyle(eta, swingEta, game.shouldSwing)
+      element.style.color = color
       target.style.left = `${Math.max(0, Math.min(1, targetX)) * 100}%`
       target.dataset.edge = targetX < 0 ? 'left' : targetX > 1 ? 'right' : ''
+      const targetLabel = target.querySelector('span')
+      if (targetLabel) targetLabel.textContent = targetX < 0 ? '← 目标画外' : targetX > 1 ? '目标画外 →' : '目标'
       paddle.style.left = `${Math.max(0, Math.min(1, paddleX)) * 100}%`
       paddle.dataset.edge = paddleX < 0 ? 'left' : paddleX > 1 ? 'right' : ''
       const paddleLabel = paddle.querySelector('span')
@@ -705,7 +708,7 @@ export default function App() {
       const peak = targetX * 1000
       let path = 'M 0 90'
       for (let x = 0; x <= 1000; x += 10) {
-        const height = 48 * Math.exp(-0.5 * ((x - peak) / 75) ** 2)
+        const height = 48 * Math.exp(-0.5 * ((x - peak) / width) ** 2)
         path += ` L ${x} ${(90 - height).toFixed(1)}`
       }
       wave.setAttribute('d', `${path} L 1000 90 Z`)
@@ -1411,7 +1414,6 @@ export default function App() {
             </svg>
             <div className="timing-target" ref={timingTargetRef} aria-hidden="true"><span>目标</span>▼</div>
             <div className="timing-paddle" ref={timingPaddleRef} aria-hidden="true">◆<span>球拍</span></div>
-            <div className="timing-label"><span ref={timingLabelRef}>来球</span></div>
           </div>
           <div className="scoreboard glass">
             <div className="score-side player">
@@ -1844,7 +1846,7 @@ export default function App() {
                   />
                 </label>
                 <div className="setting-hint">
-                  底边波峰表示预测击球位置，菱形表示球拍；颜色和文字提示来球时机，不改变击球判定。
+                  底边波峰表示预测击球位置，菱形表示球拍；来球接近时波形收窄、颜色由蓝变橙，进入挥拍提示窗口后变绿。
                 </div>
 
                 <div className="setting">
