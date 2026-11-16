@@ -281,18 +281,38 @@ export interface Prediction {
 
 /** 预测合法来球穿过我方拍面时的横向位置；触网、出界或落台次数不合法则返回 null。 */
 export function predictPlayerInterceptX(ball: Ball, alreadyBounced: boolean): number | null {
+  return predictIntercept(ball, alreadyBounced, false)?.x ?? null
+}
+
+/** 同时返回横向初速度对击球点的影响，用于调整对手来球。 */
+export function predictOpponentIntercept(ball: Ball, serve: boolean): { x: number; xTravel: number } | null {
+  return predictIntercept(ball, false, serve)
+}
+
+function predictIntercept(ball: Ball, alreadyBounced: boolean, opponentBounceFirst: boolean): { x: number; xTravel: number } | null {
   if (ball.vel.z >= 0 || ball.pos.z <= PADDLE.homeZ) return null
   const sim: Ball = { pos: { ...ball.pos }, vel: { ...ball.vel }, spin: ball.spin }
   const events: CollisionEvent[] = []
   let bounced = alreadyBounced
+  let xTravel = 0
+  let xSpeed = 1
 
   for (let t = 0; t < 3; t += FIXED_DT) {
     const previous = { ...sim.pos }
+    const previousTravel = xTravel
+    xSpeed *= Math.max(0, 1 - BALL.drag * FIXED_DT)
+    xTravel += xSpeed * FIXED_DT
     events.length = 0
     stepBall(sim, FIXED_DT, events)
     for (const event of events) {
       if (event.kind === 'net' || event.kind === 'floor') return null
       if (event.kind === 'table') {
+        xSpeed *= BALL.frictionTable
+        if (opponentBounceFirst && event.side === 'opponent') {
+          opponentBounceFirst = false
+          continue
+        }
+        if (opponentBounceFirst) return null
         if (event.side !== 'player' || bounced || event.pos.z <= PADDLE.homeZ) return null
         bounced = true
       }
@@ -302,7 +322,10 @@ export function predictPlayerInterceptX(ball: Ball, alreadyBounced: boolean): nu
     if (sim.pos.z <= PADDLE.homeZ) {
       if (!bounced) return null
       const fraction = (previous.z - PADDLE.homeZ) / (previous.z - sim.pos.z)
-      return previous.x + (sim.pos.x - previous.x) * fraction
+      return {
+        x: previous.x + (sim.pos.x - previous.x) * fraction,
+        xTravel: previousTravel + (xTravel - previousTravel) * fraction,
+      }
     }
   }
   return null

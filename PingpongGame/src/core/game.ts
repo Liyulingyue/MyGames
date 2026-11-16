@@ -9,7 +9,7 @@ import {
   TARGET_SCORE,
 } from './constants.ts'
 import type { AIConfig, HitJudgment } from './constants.ts'
-import { createAIState, updateAI } from './ai.ts'
+import { constrainOpponentShot, createAIState, updateAI, type ShotRange } from './ai.ts'
 import type { AIState } from './ai.ts'
 import {
   OUT_OF_BOUNDS,
@@ -37,6 +37,8 @@ export interface GameOptions {
   ai?: keyof typeof AI_PRESETS
   /** 自定义 AI 参数（优先于 ai 预设） */
   aiConfig?: AIConfig
+  /** 对手合法来球到达我方球拍平面时的横向范围 */
+  shotRange?: ShotRange
   /** 一局的目标分数 */
   targetScore?: number
   /** 休闲模式保留原流程；标准模式启用轮换发球和领先两分 */
@@ -147,6 +149,7 @@ export class PingPongGame {
       seed: options.seed ?? 20240501,
       ai: preset,
       aiConfig: options.aiConfig ?? AI_PRESETS[preset],
+      shotRange: options.shotRange ?? 'unlimited',
       targetScore: options.targetScore ?? TARGET_SCORE,
       rules: options.rules ?? 'casual',
       slowMotion: options.slowMotion ?? true,
@@ -411,6 +414,7 @@ export class PingPongGame {
       {
         rng: this.rng,
         config: this.options.aiConfig,
+        shotRange: this.options.shotRange,
         playerPaddle: s.playerPaddle,
         ballBouncedOnOpponentSide: s.bounces.opponent >= 1,
       },
@@ -820,6 +824,9 @@ export class PingPongGame {
       x: (clamp(x, -0.5, 0.5) - x) * 2 + rand(this.rng, -0.15, 0.15),
       y: 1.7 + (PADDLE.homeY - s.ball.pos.y) * 2.3,
       z: side === 'player' ? 2.1 : -2.1,
+    }
+    if (side === 'opponent') {
+      s.ball.vel = constrainOpponentShot(s.ball, s.ball.vel, this.options.shotRange, true)
     }
     const paddle = side === 'player' ? s.playerPaddle : s.opponentPaddle
     paddle.swingAnim = 1

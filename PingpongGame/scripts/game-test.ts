@@ -10,15 +10,193 @@
  */
 
 import { PingPongGame } from '../src/core/game.ts'
-import { AI_PRESETS, FIXED_DT, PADDLE } from '../src/core/constants.ts'
+import { AI_PRESETS, FIXED_DT, PADDLE, TABLE } from '../src/core/constants.ts'
 import type { HitJudgment } from '../src/core/constants.ts'
-import { launchTo, predictPlayerInterceptX, stepBall } from '../src/core/physics.ts'
+import { constrainOpponentShot } from '../src/core/ai.ts'
+import type { ShotRange } from '../src/core/ai.ts'
+import { launchTo, predictOpponentIntercept, predictPlayerInterceptX, stepBall } from '../src/core/physics.ts'
 import type { Ball } from '../src/core/types.ts'
 
 let failures = 0
 function assert(name: string, ok: boolean, detail = ''): void {
   if (!ok) failures++
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : `  ${detail}`}`)
+}
+
+function actualIntercept(ball: Ball, serve: boolean): number | null {
+  const sim: Ball = { pos: { ...ball.pos }, vel: { ...ball.vel }, spin: ball.spin }
+  let firstBounce = !serve
+  let playerBounce = false
+  for (let i = 0; i < 720; i++) {
+    const previous = { ...sim.pos }
+    const events: Parameters<typeof stepBall>[2] = []
+    stepBall(sim, FIXED_DT, events)
+    for (const event of events) {
+      if (event.kind === 'net' || event.kind === 'floor') return null
+      if (event.kind !== 'table') continue
+      if (!firstBounce && event.side === 'opponent') {
+        firstBounce = true
+      } else if (firstBounce && !playerBounce && event.side === 'player' && event.pos.z > PADDLE.homeZ) {
+        playerBounce = true
+      } else {
+        return null
+      }
+    }
+    if (previous.z > PADDLE.homeZ && sim.pos.z <= PADDLE.homeZ) {
+      if (!playerBounce) return null
+      const fraction = (previous.z - PADDLE.homeZ) / (previous.z - sim.pos.z)
+      return previous.x + (sim.pos.x - previous.x) * fraction
+    }
+  }
+  return null
+}
+
+console.log('=== 对手来球击球位置 ===')
+{
+  let error = ''
+  let checked = 0
+  let adjusted = 0
+  let originallyInvalid = 0
+  for (const range of ['center', 'table'] as ShotRange[]) {
+    const limit = range === 'center' ? TABLE.width * 0.3 : TABLE.halfWidth
+    for (const x of [-0.9, -0.6, -0.3, 0, 0.3, 0.6, 0.9]) {
+      for (const y of [0.08, 0.25, 0.5]) {
+        for (const target of [-0.62, -0.3, 0, 0.3, 0.62]) {
+          for (const speed of [2.4, 3.2, 4]) {
+            const pos = { x, y, z: PADDLE.opponentZ }
+            const velocity = launchTo(pos, target, -0.75, speed)
+            const ball = { pos, vel: velocity, spin: 0 }
+            const initial = actualIntercept(ball, false)
+            const constrained = constrainOpponentShot(ball, velocity, range)
+            const result = actualIntercept({ ...ball, vel: constrained }, false)
+            if (initial === null) {
+              originallyInvalid++
+              if (constrained !== velocity) error ||= `invalid shot changed: ${range} ${x} ${y} ${target} ${speed}`
+            } else {
+              checked++
+              if (constrained !== velocity) adjusted++
+              if (result === null || Math.abs(result) > limit + 1e-8) {
+                error ||= `range=${range} x=${x} y=${y} target=${target} speed=${speed} initial=${initial} result=${result}`
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  assert('限制合法回球的实际拍面穿越点，保留原本无效的来球',
+    !error && checked > 100 && adjusted > 20 && originallyInvalid > 0,
+    error || `checked=${checked} adjusted=${adjusted} invalid=${originallyInvalid}`)
+
+  const zeroShot = { pos: { x: 0.6, y: PADDLE.homeY, z: PADDLE.opponentZ }, vel: { x: 0, y: 1.7, z: -2.1 }, spin: 0 }
+  const zeroAdjusted = constrainOpponentShot(zeroShot, zeroShot.vel, 'center', true)
+  const zeroResult = actualIntercept({ ...zeroShot, vel: zeroAdjusted }, true)
+  assert('横向初速为零的有效发球仍可调整到中心范围',
+    actualIntercept(zeroShot, true) !== null && zeroResult !== null && Math.abs(zeroResult) <= TABLE.width * 0.3)
+
+  error = ''
+  let servesChecked = 0
+  let servesAdjusted = 0
+  for (const range of ['center', 'table'] as const) {
+    const limit = range === 'center' ? TABLE.width * 0.3 : TABLE.halfWidth
+    for (const x of [-PADDLE.rangeX, -0.75, -0.5, 0, 0.5, 0.75, PADDLE.rangeX]) {
+      for (const y of [PADDLE.minY, PADDLE.homeY, PADDLE.maxY]) {
+        for (const jitter of [-0.15, 0, 0.15]) {
+          const velocity = {
+            x: (Math.max(-0.5, Math.min(0.5, x)) - x) * 2 + jitter,
+            y: 1.7 + (PADDLE.homeY - y) * 2.3,
+            z: -2.1,
+          }
+          const ball = { pos: { x, y, z: PADDLE.opponentZ }, vel: velocity, spin: 0 }
+          const original = actualIntercept(ball, true)
+          const constrained = constrainOpponentShot(ball, velocity, range, true)
+          const actual = actualIntercept({ ...ball, vel: constrained }, true)
+          if (original === null) {
+            if (constrained !== velocity) error ||= `invalid serve changed: ${range} x=${x} y=${y}`
+          } else {
+            servesChecked++
+            if (constrained !== velocity) servesAdjusted++
+            if (actual === null || Math.abs(actual) > limit + 1e-8) {
+              error ||= `serve range=${range} x=${x} y=${y} jitter=${jitter} original=${original} actual=${actual}`
+            }
+          }
+        }
+      }
+    }
+  }
+  assert('对手发球覆盖球拍横向行程、高度及偏移，保持合法且实际穿越点受限',
+    !error && servesChecked > 70 && servesAdjusted > 0,
+    error || `checked=${servesChecked} adjusted=${servesAdjusted}`)
+
+  error = ''
+  for (const rules of ['casual', 'standard'] as const) {
+    for (const seed of [1, 17, 911]) {
+      const baseline = new PingPongGame({ rules, seed, autoMove: true, autoSwing: true, slowMotion: false })
+      const explicit = new PingPongGame({ rules, seed, autoMove: true, autoSwing: true, slowMotion: false, shotRange: 'unlimited' })
+      baseline.start()
+      explicit.start()
+      for (let i = 0; i < 1200; i++) {
+        if (JSON.stringify(baseline.step(FIXED_DT)) !== JSON.stringify(explicit.step(FIXED_DT)) ||
+            JSON.stringify(baseline.state) !== JSON.stringify(explicit.state)) {
+          error ||= `rules=${rules} seed=${seed} step=${i}`
+          break
+        }
+      }
+    }
+  }
+  assert('默认与显式不限的固定种子对局逐步一致', !error, error)
+
+  error = ''
+  const hitCounts = { center: 0, table: 0 }
+  const serveCounts = { center: 0, table: 0 }
+  for (const range of ['center', 'table'] as const) {
+    const limit = range === 'center' ? TABLE.width * 0.3 : TABLE.halfWidth
+    for (const difficulty of ['easy', 'normal', 'hard'] as const) {
+      for (const rules of ['casual', 'standard'] as const) {
+        for (const seed of [1, 17, 42, 911]) {
+          const game = new PingPongGame({ rules, ai: difficulty, shotRange: range, seed, autoMove: true, autoSwing: true, slowMotion: false })
+          game.start()
+          for (let i = 0; i < 1800 && !game.isGameOver; i++) {
+            const events = game.step(FIXED_DT)
+            if (!events.some((event) => event.type === 'paddleHit' && event.side === 'opponent')) continue
+            const serve = rules === 'standard' && game.state.phase === 'serve'
+            const actual = actualIntercept(game.state.ball, serve)
+            const predicted = predictOpponentIntercept(game.state.ball, serve)
+            if (actual === null) continue
+            if (serve) serveCounts[range]++
+            else hitCounts[range]++
+            if (Math.abs(actual) > limit + 1e-8 || predicted === null || Math.abs(predicted.x - actual) > 1e-8) {
+              error ||= `range=${range} difficulty=${difficulty} rules=${rules} seed=${seed} actual=${actual} predicted=${predicted?.x}`
+            }
+          }
+        }
+      }
+    }
+  }
+  assert('各强度模拟对局的回球和标准发球实际击球点均在范围内',
+    !error && hitCounts.center > 0 && hitCounts.table > 0 && serveCounts.center > 0 && serveCounts.table > 0,
+    error || `hits=${JSON.stringify(hitCounts)} serves=${JSON.stringify(serveCounts)}`)
+
+  const live = new PingPongGame({ seed: 17, autoMove: true, autoSwing: true, slowMotion: false })
+  live.start()
+  let hits = 0
+  let unchanged = false
+  let nextIntercept: number | null = null
+  for (let i = 0; i < 3600 && hits < 2; i++) {
+    const events = live.step(FIXED_DT)
+    if (!events.some((event) => event.type === 'paddleHit' && event.side === 'opponent')) continue
+    hits++
+    if (hits === 1) {
+      const before = JSON.stringify(live.state.ball)
+      live.options.shotRange = 'center'
+      unchanged = JSON.stringify(live.state.ball) === before
+    } else {
+      nextIntercept = actualIntercept(live.state.ball, false)
+    }
+  }
+  assert('对局中切档不改变飞行中的球，从下一次对手击球起生效',
+    unchanged && nextIntercept !== null && Math.abs(nextIntercept) <= TABLE.width * 0.3,
+    `hits=${hits} next=${nextIntercept}`)
 }
 
 console.log('=== 对局规则与发球 ===')

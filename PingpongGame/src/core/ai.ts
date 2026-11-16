@@ -1,7 +1,7 @@
 import type { AIConfig } from './constants.ts'
-import { PADDLE } from './constants.ts'
-import type { Ball, Paddle } from './types.ts'
-import { checkSwingReach, launchTo, movePaddleToward, predictBallAtZ } from './physics.ts'
+import { PADDLE, TABLE } from './constants.ts'
+import type { Ball, Paddle, Vec3 } from './types.ts'
+import { checkSwingReach, launchTo, movePaddleToward, predictBallAtZ, predictOpponentIntercept } from './physics.ts'
 import { clamp, rand } from './vec3.ts'
 
 export interface AIState {
@@ -46,6 +46,28 @@ export interface AIContext {
   playerPaddle: Paddle
   /** 球是否已经在对手半场落过台（落台后才轮到 AI 击球） */
   ballBouncedOnOpponentSide: boolean
+  shotRange: ShotRange
+}
+
+export type ShotRange = 'center' | 'table' | 'unlimited'
+
+/** 保留原轨迹的纵向运动，仅在合法来球超出范围时调整横向速度。 */
+export function constrainOpponentShot(ball: Ball, velocity: Vec3, range: ShotRange, serve = false): Vec3 {
+  if (range === 'unlimited') return velocity
+  const shot = { pos: ball.pos, vel: velocity, spin: 0 }
+  const prediction = predictOpponentIntercept(shot, serve)
+  const limit = range === 'center' ? TABLE.width * 0.3 : TABLE.halfWidth
+  if (prediction === null || Math.abs(prediction.x) <= limit) return velocity
+
+  const edge = clamp(prediction.x, -limit + 0.005, limit - 0.005)
+  let adjusted = velocity
+  for (const fraction of [1, 0.75, 0.5, 0.25, 0]) {
+    adjusted = { ...velocity, x: (edge * fraction - ball.pos.x) / prediction.xTravel }
+    const result = predictOpponentIntercept({ ...shot, vel: adjusted }, serve)
+    if (result !== null && Math.abs(result.x) <= limit) return adjusted
+  }
+  // 极端角度无法找到合法轨迹时，仍让中心方向的球按物理规则判定失误。
+  return adjusted
 }
 
 export type AIAction =
@@ -124,7 +146,7 @@ export function updateAI(ai: AIState, ball: Ball, ctx: AIContext, dt: number): A
   const targetZ = rand(rng, -1.0, -0.5)
   const speed = rand(rng, config.shotSpeed[0], config.shotSpeed[1])
 
-  const velocity = launchTo(ball.pos, targetX, targetZ, speed)
+  const velocity = constrainOpponentShot(ball, launchTo(ball.pos, targetX, targetZ, speed), ctx.shotRange)
 
   ai.paddle.swingAnim = 1
   ai.paddle.lastSwingPower = 0.6

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { ALIGN_DEFAULT_RANGE, PingPongGame } from './core/game.ts'
 import type { RulesMode } from './core/game.ts'
+import type { ShotRange } from './core/ai.ts'
 import { AI_PRESETS, HIT_JUDGMENT_PRESETS, PADDLE, PLAYER, TARGET_SCORE } from './core/constants.ts'
 import type { HitJudgment } from './core/constants.ts'
 import type { Phase, Side } from './core/types.ts'
@@ -30,6 +31,12 @@ const HIT_JUDGMENT_LABELS: Record<HitJudgment, string> = {
   strong: '强',
 }
 const HIT_JUDGMENT_LEVELS: HitJudgment[] = ['light', 'standard', 'strong']
+const SHOT_RANGE_LABELS: Record<ShotRange, string> = {
+  center: '中心 20%～80%',
+  table: '球台 0%～100%',
+  unlimited: '不限',
+}
+const SHOT_RANGES: ShotRange[] = ['center', 'table', 'unlimited']
 
 /**
  * 由"挥拍灵敏度"推出垂直位移阈值。
@@ -178,6 +185,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('menu')
   const [inputMode, setInputMode] = useState<InputMode>('keyboard')
   const [difficulty, setDifficulty] = useState<Difficulty>('normal')
+  const [shotRange, setShotRange] = useState<ShotRange>('unlimited')
   const [rules, setRules] = useState<RulesMode>('casual')
   const [swingThreshold, setSwingThreshold] = useState<number>(PLAYER.swingThreshold)
   const [slowMotion, setSlowMotion] = useState(true)
@@ -263,6 +271,7 @@ export default function App() {
   const slowMotionRef = useRef(slowMotion)
   const swingThresholdRef = useRef(swingThreshold)
   const difficultyRef = useRef(difficulty)
+  const shotRangeRef = useRef(shotRange)
   const rulesRef = useRef(rules)
   const cameraFaultRef = useRef<string | null>(null)
   const showPoseOverlayRef = useRef(showPoseOverlay)
@@ -288,6 +297,7 @@ export default function App() {
   slowMotionRef.current = slowMotion
   swingThresholdRef.current = swingThreshold
   difficultyRef.current = difficulty
+  shotRangeRef.current = shotRange
   rulesRef.current = rules
   showPoseOverlayRef.current = showPoseOverlay
   timeScaleRef.current = timeScale
@@ -556,6 +566,7 @@ export default function App() {
     const game = new PingPongGame({
       seed: Math.floor(Math.random() * 1e9),
       ai: difficultyRef.current,
+      shotRange: shotRangeRef.current,
       targetScore: TARGET_SCORE,
       rules: rulesRef.current,
       slowMotion: slowMotionRef.current,
@@ -1064,6 +1075,10 @@ export default function App() {
     game.options.slowMotion = slowMotion
   }, [difficulty, slowMotion])
 
+  useEffect(() => {
+    if (gameRef.current) gameRef.current.options.shotRange = shotRange
+  }, [shotRange])
+
   // 比分变了就重播一次数字动画
   useEffect(() => {
     const prev = prevScoreRef.current
@@ -1391,6 +1406,7 @@ export default function App() {
             <div className="settings-preview-summary" aria-live="polite">
               <span>{inputMode === 'pose' ? '体感' : inputMode === 'mouse' ? '鼠标' : '键盘'}操作</span>
               <span>对手：{difficulty === 'easy' ? '简单' : difficulty === 'normal' ? '普通' : '困难'}</span>
+              <span>来球范围：{SHOT_RANGE_LABELS[shotRange]}</span>
               <span>球速：{timeScale.toFixed(2)}x</span>
               <span>击球判定：{HIT_JUDGMENT_LABELS[hitJudgment]}</span>
               <span>击球提示带：{timingGuide ? `${timingGuideHeight.toFixed(1)}x` : '关'}</span>
@@ -1691,6 +1707,27 @@ export default function App() {
                         {d === 'easy' ? '简单' : d === 'normal' ? '普通' : '困难'}
                       </button>
                     ))}
+                  </div>
+                </div>
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>对手来球击球位置</span>
+                  </div>
+                  <div className="seg">
+                    {SHOT_RANGES.map((range) => (
+                      <button
+                        key={range}
+                        className={shotRange === range ? 'active' : ''}
+                        aria-pressed={shotRange === range}
+                        onClick={() => setShotRange(range)}
+                      >
+                        {SHOT_RANGE_LABELS[range]}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="setting-hint">
+                    限制对手合法来球到达我方球拍平面时的横向位置；切换后从下一次对手击球或发球生效。
+                    不限保持原有轨迹；此设置不代替走位或挥拍。
                   </div>
                 </div>
               </div>
