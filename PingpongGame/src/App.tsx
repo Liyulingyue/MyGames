@@ -309,13 +309,16 @@ export default function App() {
     inputModeRef.current = mode
     setInputMode(mode)
     if (mode !== 'pose') {
-      if (cameraFaultRef.current) {
+      if (pendingTrackerRef.current) {
         cameraGenerationRef.current++
-        pendingTrackerRef.current?.close()
+        pendingTrackerRef.current.close()
         pendingTrackerRef.current = null
         cameraSetupPromiseRef.current = null
         setBooting(false)
         setLoadProgress(null)
+        setHud((h) => h.cameraState === 'loading' ? { ...h, cameraState: 'off' } : h)
+      }
+      if (cameraFaultRef.current) {
         trackerRef.current?.videoElement?.remove()
         trackerRef.current?.close()
         trackerRef.current = null
@@ -379,8 +382,8 @@ export default function App() {
     video.style.transform = 'scaleX(-1)'
   }, [])
 
-  /** 启动摄像头与姿态模型。成功返回 true，失败返回 false（已自动回退到键盘模式） */
-  const setupCamera = useCallback((): Promise<boolean> => {
+  /** 重新连接失败时保留暂停；普通初始化失败则回退到键盘。 */
+  const setupCamera = useCallback((fallbackOnFailure = true): Promise<boolean> => {
     if (trackerRef.current) return Promise.resolve(true)
     if (cameraSetupPromiseRef.current) return cameraSetupPromiseRef.current
 
@@ -414,10 +417,15 @@ export default function App() {
         tracker?.close()
         if (generation !== cameraGenerationRef.current) return false
         const message = err instanceof Error ? err.message : String(err)
-        setBootError(`摄像头 / 模型初始化失败：${message}\n已自动切换到键盘模式，可以先开始游戏。`)
-        // 游戏中途切到体感模式失败时，错误要显示在 HUD 上（菜单上的提示看不到）
         setHud((h) => ({ ...h, cameraState: 'error', cameraError: message }))
-        switchInputMode('keyboard')
+        if (fallbackOnFailure) {
+          setBootError(`摄像头 / 模型初始化失败：${message}\n已自动切换到键盘模式，可以先开始游戏。`)
+          switchInputMode('keyboard')
+        } else {
+          const fault = `重新连接失败：${message}`
+          cameraFaultRef.current = fault
+          setCameraFault(fault)
+        }
         return false
       } finally {
         if (generation === cameraGenerationRef.current) {
@@ -440,7 +448,7 @@ export default function App() {
     trackerRef.current?.videoElement?.remove()
     trackerRef.current?.close()
     trackerRef.current = null
-    const ok = await setupCamera()
+    const ok = await setupCamera(false)
     if (ok) {
       cameraFaultRef.current = null
       setCameraFault(null)
@@ -840,16 +848,14 @@ export default function App() {
             game.setPlayerTarget(target.x)
           }
 
-          if (resultScreen) {
-            mouse.consumeSwing()
-          } else if (isMouseSwing(swingSourceRef.current)) {
-            // 体感 + 鼠标击球：走位看身体，击球用鼠标左键
-            if (mouseSwing) game.swing(0.75)
-          } else {
+          if (!resultScreen && !isMouseSwing(swingSourceRef.current)) {
             // 挥拍检测不依赖身体位置：肩膀没识别到时，手臂照样能挥出信号
             const result = detector.process(frame, now)
             if (result.swung) game.swing(result.power)
           }
+        }
+        if (!game.isGameOver && isMouseSwing(swingSourceRef.current) && mouseSwing) {
+          game.swing(0.75)
         }
       } else if (inputModeRef.current === 'mouse') {
         lastFreshFrame = now
@@ -1265,7 +1271,11 @@ export default function App() {
     }
     if (rules === 'standard' && hud.phase === 'serve') {
       if (hud.server === 'player' && hud.serveStage === 'waiting') {
-        return { main: '轮到你发球', sub: '移动球拍选择发球位置，然后挥拍', cls: 'prompt' }
+        return {
+          main: '轮到你发球',
+          sub: autoSwing ? '移动球拍选择发球位置，即将自动发球' : '移动球拍选择发球位置，然后挥拍',
+          cls: 'prompt',
+        }
       }
       return { main: hud.server === 'player' ? '我方发球' : '对手发球', sub: '发球先落发球方，再落接球方', cls: 'prompt' }
     }
@@ -1277,6 +1287,15 @@ export default function App() {
     }
     return null
   })()
+
+  const cameraErrorNotice = inputMode !== 'pose' && hud.cameraState === 'error' && hud.cameraError && (
+    <div className="status-error" role="alert">
+      摄像头初始化失败：{hud.cameraError}。当前使用{inputMode === 'keyboard' ? '键盘' : '鼠标'}模式，可在设置中调整。
+      <button className="mini-btn" onClick={() => setHud((h) => ({ ...h, cameraError: null }))}>
+        关闭提示
+      </button>
+    </div>
+  )
 
   return (
     <div className={`app ${screen !== 'playing' && environment === 'bright' ? 'menu-bright' : ''}`}>
@@ -1368,6 +1387,8 @@ export default function App() {
                 详情
               </button>
             </div>
+
+            {!showSettings && cameraErrorNotice}
 
             {showStatus && (
               <div className="status-body">
@@ -1517,6 +1538,7 @@ export default function App() {
                   关闭设置
                 </button>}
               </div>
+              {screen === 'playing' && cameraErrorNotice}
               {screen === 'playing' && (
                 <button className="ghost-btn settings-home" onClick={() => setConfirmExit(true)}>
                   返回首页

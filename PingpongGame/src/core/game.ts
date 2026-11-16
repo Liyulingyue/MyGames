@@ -367,6 +367,10 @@ export class PingPongGame {
     if (this.options.rules === 'standard' && s.phase === 'serve' && s.serveStage === 'waiting') {
       if (s.server === 'player') {
         s.ball.pos.x = clamp(s.playerPaddle.x, -0.5, 0.5)
+        if (this.options.autoSwing) {
+          this.serveTimer -= dt
+          if (this.serveTimer <= 0) this.swing(0.6)
+        }
       } else {
         this.serveTimer -= dt
         if (this.serveTimer <= 0) this.launchServe('opponent', events)

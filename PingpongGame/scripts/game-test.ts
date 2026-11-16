@@ -57,6 +57,23 @@ console.log('=== 对局规则与发球 ===')
   }
   assert('玩家发球先落我方、再落对方', playerBounces.join(',') === 'player,opponent')
 
+  const automatic = new PingPongGame({ rules: 'standard', autoSwing: true, slowMotion: false, pointDelay: 0 })
+  automatic.start()
+  automatic.state.score = { player: 1, opponent: 1 }
+  automatic.state.phase = 'point'
+  automatic.state.pointTimer = 0
+  automatic.step(0.01)
+  let autoServeHits = 0
+  const autoBounces: string[] = []
+  for (let i = 0; i < 600 && autoBounces.length < 2; i++) {
+    for (const event of automatic.step(1 / 120)) {
+      if (event.type === 'paddleHit' && event.side === 'player') autoServeHits++
+      if (event.type === 'bounce' && event.side) autoBounces.push(event.side)
+    }
+  }
+  assert('辅助击球自动发球一次并保持合法落台',
+    autoServeHits === 1 && autoBounces.join(',') === 'player,opponent')
+
   prepareScore(2, 2)
   assert('四分后轮回对手发球', game.state.server === 'opponent')
   prepareScore(10, 10)
