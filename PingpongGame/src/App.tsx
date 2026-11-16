@@ -7,7 +7,7 @@ import type { Phase, Side } from './core/types.ts'
 import type { GameRenderer } from './render/renderer.ts'
 import type { Environment } from './render/scene.ts'
 import { CAMERA_LIMITS, DEFAULT_CAMERA, VIEW, checkFrame, type CameraPose } from './render/view.ts'
-import { timingGuideStyle } from './render/timingGuide.ts'
+import { TIMING_WAVE_HEIGHT, timingGuidePath, timingGuideStyle } from './render/timingGuide.ts'
 import { PoseTracker, isVisible } from './input/poseTracker.ts'
 import type { MotionSource, PoseFrame, PoseLoadProgress } from './input/poseTracker.ts'
 import { SwingDetector, paddleTargetFromPose, pickArmSample, handOf, isMouseSwing } from './input/swingDetector.ts'
@@ -16,6 +16,7 @@ import { KeyboardController } from './input/keyboard.ts'
 import { MouseController } from './input/mouse.ts'
 import { SoundEngine } from './input/sound.ts'
 import { SettingsPreview } from './SettingsPreview.tsx'
+import { TimingGuide } from './TimingGuide.tsx'
 import { ResultGesture } from './input/resultGesture.ts'
 import type { ResultAction } from './input/resultGesture.ts'
 
@@ -190,6 +191,7 @@ export default function App() {
   const [autoSwing, setAutoSwing] = useState(false)
   const [hitJudgment, setHitJudgment] = useState<HitJudgment>('standard')
   const [timingGuide, setTimingGuide] = useState(true)
+  const [timingGuideHeight, setTimingGuideHeight] = useState(1)
   const [softAlign, setSoftAlign] = useState(false)
   const [softAlignRange, setSoftAlignRange] = useState(ALIGN_DEFAULT_RANGE)
   /**
@@ -706,13 +708,7 @@ export default function App() {
       const paddleLabel = paddle.querySelector('span')
       if (paddleLabel) paddleLabel.textContent = paddleX < 0 ? '← 球拍画外' : paddleX > 1 ? '球拍画外 →' : '球拍'
 
-      const peak = targetX * 1000
-      let path = 'M 0 90'
-      for (let x = 0; x <= 1000; x += 10) {
-        const height = 48 * Math.exp(-0.5 * ((x - peak) / width) ** 2)
-        path += ` L ${x} ${(90 - height).toFixed(1)}`
-      }
-      wave.setAttribute('d', `${path} L 1000 90 Z`)
+      wave.setAttribute('d', timingGuidePath(targetX, width))
     }
 
     /**
@@ -1386,16 +1382,18 @@ export default function App() {
               displaySize={displaySize}
               cameraPose={cameraPose}
               aspect={viewAspect}
+              timingGuide={timingGuide}
+              timingGuideHeight={timingGuideHeight}
             />
             <div className="settings-preview-summary" aria-live="polite">
               <span>{inputMode === 'pose' ? '体感' : inputMode === 'mouse' ? '鼠标' : '键盘'}操作</span>
               <span>对手：{difficulty === 'easy' ? '简单' : difficulty === 'normal' ? '普通' : '困难'}</span>
               <span>球速：{timeScale.toFixed(2)}x</span>
               <span>击球判定：{HIT_JUDGMENT_LABELS[hitJudgment]}</span>
-              <span>击球提示带：{timingGuide ? '开' : '关'}</span>
+              <span>击球提示带：{timingGuide ? `${timingGuideHeight.toFixed(1)}x` : '关'}</span>
               <span>软吸附：{softAlign ? autoMove ? '自动跟球优先' : `${Math.round(softAlignRange * 100)}cm` : '关'}</span>
               <span>音效：{soundOn ? `${Math.round(soundVolume * 100)}%` : '关闭'}</span>
-              <p>静态预览不模拟对局；操作、球速和辅助效果需开始游戏体验。</p>
+              <p>提示带为静态示例；操作、球速和实际辅助效果需开始游戏体验。</p>
               {inputMode === 'pose' && <p>摄像头：{hud.cameraState === 'ready' ? '已就绪' : hud.cameraState === 'loading' ? '正在准备' : '未就绪'}</p>}
               {bootError && <p className="start-error" role="alert">{bootError}</p>}
               {booting && <LoadProgressBar progress={loadProgress} />}
@@ -1404,16 +1402,13 @@ export default function App() {
         </main>
       )}
 
-      <div className={`hud ${timingGuide ? 'guidance-on' : ''}`}>
+      <div
+        className={`hud ${timingGuide ? 'guidance-on' : ''}`}
+        style={{ '--timing-wave-height': `${TIMING_WAVE_HEIGHT * timingGuideHeight}px` } as CSSProperties}
+      >
         {screen === 'playing' && (
           <>
-          <div className="timing-guide" ref={timingGuideElementRef} data-phase="hidden" role="img" aria-label="击球提示带">
-            <svg viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
-              <path ref={timingWaveRef} />
-            </svg>
-            <div className="timing-target" ref={timingTargetRef} aria-hidden="true"><span>目标</span>▼</div>
-            <div className="timing-paddle" ref={timingPaddleRef} aria-hidden="true">◆<span>球拍</span></div>
-          </div>
+          <TimingGuide guideRef={timingGuideElementRef} waveRef={timingWaveRef} targetRef={timingTargetRef} paddleRef={timingPaddleRef} />
           <div className="scoreboard glass">
             <div className="score-side player">
               <span className="score-label">你</span>
@@ -1846,6 +1841,23 @@ export default function App() {
                 </label>
                 <div className="setting-hint">
                   底边波峰表示预测击球位置，菱形表示球拍；来球接近时波形收窄、颜色由蓝变橙，进入挥拍提示窗口后变绿。
+                </div>
+
+                <div className="setting">
+                  <div className="setting-label">
+                    <span>提示带高度</span>
+                    <b>{timingGuideHeight.toFixed(1)}x</b>
+                  </div>
+                  <Slider
+                    min={1}
+                    max={5}
+                    step={0.1}
+                    value={timingGuideHeight}
+                    defaultValue={1}
+                    ariaLabel="提示带高度"
+                    onChange={setTimingGuideHeight}
+                  />
+                  <div className="setting-hint">波形高度为原来的 1～5 倍；高度越大，占用画面越多，不影响击球判定。</div>
                 </div>
 
                 <div className="setting">

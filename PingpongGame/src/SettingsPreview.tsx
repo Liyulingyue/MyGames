@@ -3,6 +3,8 @@ import { PingPongGame } from './core/game.ts'
 import type { GameRenderer } from './render/renderer.ts'
 import type { Environment } from './render/scene.ts'
 import type { CameraPose } from './render/view.ts'
+import { TIMING_WAVE_HEIGHT } from './render/timingGuide.ts'
+import { TimingGuide } from './TimingGuide.tsx'
 
 interface PreviewSettings {
   environment: Environment
@@ -15,15 +17,39 @@ export function SettingsPreview({
   displaySize,
   cameraPose,
   aspect,
-}: PreviewSettings & { aspect: number }) {
+  timingGuide,
+  timingGuideHeight,
+}: PreviewSettings & { aspect: number; timingGuide: boolean; timingGuideHeight: number }) {
+  const frameRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<GameRenderer | null>(null)
   const settingsRef = useRef<PreviewSettings>({ environment, displaySize, cameraPose })
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [attempt, setAttempt] = useState(0)
+  const [previewSize, setPreviewSize] = useState({ width: 0, height: 0, scale: 0 })
 
   settingsRef.current = { environment, displaySize, cameraPose }
+
+  useEffect(() => {
+    const frame = frameRef.current
+    if (!frame) return
+    const resize = () => {
+      setPreviewSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
+        scale: frame.clientWidth / window.innerWidth,
+      })
+    }
+    const observer = new ResizeObserver(resize)
+    observer.observe(frame)
+    window.addEventListener('resize', resize)
+    resize()
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', resize)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -72,8 +98,21 @@ export function SettingsPreview({
   }, [environment, displaySize, cameraPose])
 
   return (
-    <div className="settings-preview-frame" style={{ '--screen-aspect': aspect } as CSSProperties}>
+    <div className="settings-preview-frame" ref={frameRef} style={{ '--screen-aspect': aspect } as CSSProperties}>
       <div className="settings-preview-canvas" ref={hostRef} aria-label="球台画面预览" />
+      {timingGuide && previewSize.scale > 0 && (
+        <div
+          className="settings-preview-guide"
+          style={{
+            width: previewSize.width,
+            height: previewSize.height,
+            transform: `scale(${previewSize.scale})`,
+            '--timing-wave-height': `${TIMING_WAVE_HEIGHT * timingGuideHeight}px`,
+          } as CSSProperties}
+        >
+          <TimingGuide preview />
+        </div>
+      )}
       {loading && <div className="settings-preview-message" role="status">正在加载画面预览…</div>}
       {error && (
         <div className="settings-preview-message" role="alert">

@@ -13,3 +13,16 @@ export function timingGuideStyle(eta: number, startEta: number, shouldSwing: boo
     width: 155 - 120 * progress,
   }
 }
+
+/** Original 92px guide: 48% from the wave baseline to its peak. */
+export const TIMING_WAVE_HEIGHT = 44.16
+
+export function timingGuidePath(targetX: number, width: number): string {
+  const peak = targetX * 1000
+  let path = 'M 0 90'
+  for (let x = 0; x <= 1000; x += 10) {
+    const height = 48 * Math.exp(-0.5 * ((x - peak) / width) ** 2)
+    path += ` L ${x} ${(90 - height).toFixed(1)}`
+  }
+  return `${path} L 1000 90 Z`
+}
