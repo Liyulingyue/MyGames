@@ -66,7 +66,6 @@ export class GameRenderer {
   private playerPaddle: THREE.Group
   private opponentPaddle: THREE.Group
   private opponent: ReturnType<typeof createScene>['opponent']
-  private alignMarker: THREE.Mesh
   private resizeObserver: ResizeObserver
 
   /** 球的拖尾：历史位置上的渐隐光点 */
@@ -123,17 +122,6 @@ export class GameRenderer {
 
     this.opponentPaddle = createPaddle('#2f5bc8', '#c9a227')
     this.scene.add(this.opponentPaddle)
-
-    this.alignMarker = new THREE.Mesh(
-      new THREE.RingGeometry(0.083, 0.091, 32),
-      new THREE.MeshBasicMaterial({
-        color: '#67e8f9', transparent: true, opacity: 0.8, depthTest: false, depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-    )
-    this.alignMarker.visible = false
-    this.alignMarker.renderOrder = 10
-    this.scene.add(this.alignMarker)
 
     this.resize()
     this.resizeObserver = new ResizeObserver(() => this.resize())
@@ -226,11 +214,6 @@ export class GameRenderer {
     applyPaddleTransform(this.opponentPaddle, state.opponentPaddle, -0.18)
 
     this.opponent.sync(state.opponentPaddle, this.opponentPaddle)
-    this.alignMarker.visible = state.predictionTargetX !== null
-    if (state.predictionTargetX !== null) {
-      this.alignMarker.position.set(state.predictionTargetX, state.playerPaddle.y + 0.28, PADDLE.homeZ + 0.02)
-    }
-
     // 相机跟随我方横向位置（轻微，增加临场感）
     // 跟随量是相对用户设定位的偏移，用户把相机推到左边不会把跟随吃掉。
     const targetX = state.playerPaddle.x * 0.22

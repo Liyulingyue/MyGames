@@ -536,10 +536,9 @@ console.log('\n=== 提前预测软吸附 ===')
   function prepare(
     ball: Ball,
     bounced: boolean,
-    options: { predictionAssist?: boolean; timingGuide?: boolean; softAlign?: boolean; autoMove?: boolean } = {},
+    options: { timingGuide?: boolean; softAlign?: boolean; autoMove?: boolean } = {},
   ): PingPongGame {
     const game = new PingPongGame({
-      predictionAssist: options.predictionAssist ?? true,
       timingGuide: options.timingGuide ?? false,
       softAlign: options.softAlign ?? true,
       autoMove: options.autoMove ?? false,
@@ -564,8 +563,8 @@ console.log('\n=== 提前预测软吸附 ===')
     if (events.some((event) => event.type === 'swing')) swung = true
   }
   const earlyOffset = early.state.playerPaddle.x - target
-  assert('对手击球后、我方落台前显示预测并吸附',
-    !early.state.playerWindowOpen && early.state.predictionTargetX !== null && earlyOffset > 0 && !swung)
+  assert('对手击球后、我方落台前进行预测并吸附',
+    !early.state.playerWindowOpen && early.predictedInterceptX !== null && earlyOffset > 0 && !swung)
   if (afterBounce) {
     const late = prepare(afterBounce, true)
     for (let i = 0; i < 3; i++) late.step(FIXED_DT)
@@ -586,51 +585,54 @@ console.log('\n=== 提前预测软吸附 ===')
 
   early.state.ball = { pos: { x: 0, y: 0.1, z: 0.004 }, vel: { x: 0, y: -1, z: -3 }, spin: 0 }
   early.step(FIXED_DT)
-  assert('实际触网立即移除预测标记', early.state.predictionTargetX === null)
+  assert('实际触网立即清除预测', early.predictedInterceptX === null)
   early.state.ball = { pos: { ...incoming.pos }, vel: { ...incoming.vel }, spin: incoming.spin }
   early.refreshPrediction()
   early.options.autoMove = true
   early.refreshPrediction()
-  assert('辅助移动开启时仍可显示预测', early.state.predictionTargetX !== null)
+  assert('辅助移动优先且提示带关闭时无需预测', early.predictedInterceptX === null)
+  early.options.timingGuide = true
+  early.refreshPrediction()
+  assert('辅助移动开启时提示带仍可预测', early.predictedInterceptX !== null)
   early.options.autoMove = false
   early.refreshPrediction()
   early.options.softAlign = false
   early.refreshPrediction()
-  assert('关闭软吸附时辅助预测仍然显示', early.state.predictionTargetX !== null)
-  early.options.predictionAssist = false
+  assert('关闭软吸附时提示带仍可预测', early.predictedInterceptX !== null)
+  early.options.timingGuide = false
   early.refreshPrediction()
-  assert('关闭辅助预测时立即隐藏标记', early.state.predictionTargetX === null)
-  early.options.predictionAssist = true
+  assert('关闭提示带和软吸附时立即清除预测', early.predictedInterceptX === null)
+  early.options.timingGuide = true
   early.state.lastHitter = null
   early.refreshPrediction()
-  assert('对手尚未击球时不显示预测', early.state.predictionTargetX === null)
+  assert('对手尚未击球时不预测', early.predictedInterceptX === null)
 
   const combinations = [
-    { predictionAssist: false, softAlign: false },
-    { predictionAssist: true, softAlign: false },
-    { predictionAssist: false, softAlign: true },
-    { predictionAssist: true, softAlign: true },
+    { timingGuide: false, softAlign: false },
+    { timingGuide: true, softAlign: false },
+    { timingGuide: false, softAlign: true },
+    { timingGuide: true, softAlign: true },
   ].map((options) => {
     const game = prepare(incoming, false, options)
     for (let i = 0; i < 18; i++) game.step(FIXED_DT)
-    return { marker: game.state.predictionTargetX, offset: game.state.playerPaddle.x - target }
+    return { prediction: game.predictedInterceptX, offset: game.state.playerPaddle.x - target }
   })
-  assert('辅助预测独立控制标记，不改变球拍位置',
-    combinations[0].marker === null && combinations[1].marker !== null &&
+  assert('提示带独立预测，不改变球拍位置',
+    combinations[0].prediction === null && combinations[1].prediction !== null &&
       combinations[0].offset === 0 && combinations[1].offset === 0)
-  assert('仅软吸附时仍有引导但不显示标记',
-    combinations[2].marker === null && combinations[2].offset > 0)
-  assert('同时开启时显示标记且引导与单独软吸附一致',
-    combinations[3].marker !== null && Math.abs(combinations[3].offset - combinations[2].offset) < 1e-9)
+  assert('仅软吸附时仍可预测并引导',
+    combinations[2].prediction !== null && combinations[2].offset > 0)
+  assert('同时开启提示带和软吸附时引导与单独软吸附一致',
+    combinations[3].prediction !== null && Math.abs(combinations[3].offset - combinations[2].offset) < 1e-9)
 
-  const guide = prepare(incoming, false, { predictionAssist: false, timingGuide: true, softAlign: false })
-  const withoutGuide = prepare(incoming, false, { predictionAssist: false, timingGuide: false, softAlign: false })
+  const guide = prepare(incoming, false, { timingGuide: true, softAlign: false })
+  const withoutGuide = prepare(incoming, false, { timingGuide: false, softAlign: false })
   for (let i = 0; i < 18; i++) {
     guide.step(FIXED_DT)
     withoutGuide.step(FIXED_DT)
   }
-  assert('击球提示带独立预测，不显示场景标记或影响球和球拍',
-    guide.predictedInterceptX !== null && guide.state.predictionTargetX === null &&
+  assert('击球提示带独立预测，不影响球和球拍',
+    guide.predictedInterceptX !== null &&
       guide.state.playerPaddle.x === withoutGuide.state.playerPaddle.x &&
       JSON.stringify(guide.state.ball) === JSON.stringify(withoutGuide.state.ball))
   guide.options.timingGuide = false

@@ -189,7 +189,6 @@ export default function App() {
   const [autoMove, setAutoMove] = useState(false)
   const [autoSwing, setAutoSwing] = useState(false)
   const [hitJudgment, setHitJudgment] = useState<HitJudgment>('standard')
-  const [predictionAssist, setPredictionAssist] = useState(false)
   const [timingGuide, setTimingGuide] = useState(true)
   const [softAlign, setSoftAlign] = useState(false)
   const [softAlignRange, setSoftAlignRange] = useState(ALIGN_DEFAULT_RANGE)
@@ -269,7 +268,6 @@ export default function App() {
   const autoMoveRef = useRef(autoMove)
   const autoSwingRef = useRef(autoSwing)
   const hitJudgmentRef = useRef(hitJudgment)
-  const predictionAssistRef = useRef(predictionAssist)
   const timingGuideRef = useRef(timingGuide)
   const softAlignRef = useRef(softAlign)
   const softAlignRangeRef = useRef(softAlignRange)
@@ -294,7 +292,6 @@ export default function App() {
   autoMoveRef.current = autoMove
   autoSwingRef.current = autoSwing
   hitJudgmentRef.current = hitJudgment
-  predictionAssistRef.current = predictionAssist
   timingGuideRef.current = timingGuide
   softAlignRef.current = softAlign
   softAlignRangeRef.current = softAlignRange
@@ -564,7 +561,6 @@ export default function App() {
       autoMove: autoMoveRef.current,
       autoSwing: autoSwingRef.current,
       hitJudgment: hitJudgmentRef.current,
-      predictionAssist: predictionAssistRef.current,
       timingGuide: timingGuideRef.current,
       softAlign: softAlignRef.current,
       softAlignRange: softAlignRangeRef.current,
@@ -1186,7 +1182,6 @@ export default function App() {
     game.options.autoMove = autoMove
     game.options.autoSwing = autoSwing
     game.options.hitJudgment = hitJudgment
-    game.options.predictionAssist = predictionAssist
     game.options.timingGuide = timingGuide
     game.options.softAlign = softAlign
     game.options.softAlignRange = softAlignRange
@@ -1195,7 +1190,7 @@ export default function App() {
       rendererRef.current.sync(game.state)
       rendererRef.current.render()
     }
-  }, [timeScale, autoMove, autoSwing, hitJudgment, predictionAssist, timingGuide, softAlign, softAlignRange])
+  }, [timeScale, autoMove, autoSwing, hitJudgment, timingGuide, softAlign, softAlignRange])
 
   // 显示尺寸实时生效（只动相机，物理完全不受影响）
   useEffect(() => {
@@ -1397,7 +1392,6 @@ export default function App() {
               <span>对手：{difficulty === 'easy' ? '简单' : difficulty === 'normal' ? '普通' : '困难'}</span>
               <span>球速：{timeScale.toFixed(2)}x</span>
               <span>击球判定：{HIT_JUDGMENT_LABELS[hitJudgment]}</span>
-              <span>辅助预测：{predictionAssist ? '开' : '关'}</span>
               <span>击球提示带：{timingGuide ? '开' : '关'}</span>
               <span>软吸附：{softAlign ? autoMove ? '自动跟球优先' : `${Math.round(softAlignRange * 100)}cm` : '关'}</span>
               <span>音效：{soundOn ? `${Math.round(soundVolume * 100)}%` : '关闭'}</span>
@@ -1877,18 +1871,6 @@ export default function App() {
                     前后距离 {PADDLE.swingDepth * 100}cm。标准档为原有辅助效果；
                     只对落台后飞向球拍的来球生效。仍需自己走位和挥拍；修改从下次挥拍起生效。
                   </div>
-                </div>
-
-                <label className="setting switch">
-                  <span>辅助预测</span>
-                  <input
-                    type="checkbox"
-                    checked={predictionAssist}
-                    onChange={(e) => setPredictionAssist(e.target.checked)}
-                  />
-                </label>
-                <div className="setting-hint">
-                  对手击球后，球拍上方的青色圆环标示预测横向位置；只显示提示，不移动球拍。
                 </div>
 
                 <label className="setting switch">

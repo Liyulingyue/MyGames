@@ -74,9 +74,7 @@ export interface GameOptions {
   autoSwing?: boolean
   /** 手动击球判定档位 */
   hitJudgment?: HitJudgment
-  /** 显示预测击球位置，不影响球拍移动 */
-  predictionAssist?: boolean
-  /** 为击球提示带计算预测位置，不显示场景标记 */
+  /** 为击球提示带计算预测位置 */
   timingGuide?: boolean
   /** 输入位置进入预测击球点附近时吸附；范围单位为米 */
   softAlign?: boolean
@@ -99,8 +97,6 @@ export interface GameState {
   lastHitter: Side | null
   /** 挥拍窗口是否打开：球已在我方半场落台，等我挥拍 */
   playerWindowOpen: boolean
-  /** 辅助预测显示的横向击球位置；关闭或无合法来球时为 null */
-  predictionTargetX: number | null
   /** 当前时间倍率（慢动作） */
   timeScale: number
   /** 本回合击球次数 */
@@ -162,7 +158,6 @@ export class PingPongGame {
       autoMove: options.autoMove ?? false,
       autoSwing: options.autoSwing ?? false,
       hitJudgment: options.hitJudgment ?? 'standard',
-      predictionAssist: options.predictionAssist ?? false,
       timingGuide: options.timingGuide ?? false,
       softAlign: options.softAlign ?? false,
       softAlignRange: options.softAlignRange ?? ALIGN_DEFAULT_RANGE,
@@ -197,7 +192,6 @@ export class PingPongGame {
       bounces: { player: 0, opponent: 0 },
       lastHitter: null,
       playerWindowOpen: false,
-      predictionTargetX: null,
       timeScale: 1,
       rallyHits: 0,
       elapsed: 0,
@@ -234,7 +228,6 @@ export class PingPongGame {
     this.state.opponentPaddle = this.ai.paddle
     this.state.swingCooldown = 0
     this.state.swingActiveTimer = 0
-    this.state.predictionTargetX = null
     this.interceptX = null
     this.predictionTimer = 0
     this.resetAlign()
@@ -245,7 +238,6 @@ export class PingPongGame {
   /** 结束当前一局，回到待开始状态 */
   stop(): void {
     this.state.phase = 'idle'
-    this.state.predictionTargetX = null
     this.interceptX = null
     this.predictionTimer = 0
     this.resetAlign()
@@ -509,12 +501,11 @@ export class PingPongGame {
 
   private updatePrediction(dt: number, changed: boolean): void {
     const s = this.state
-    if ((!this.options.predictionAssist && !this.options.timingGuide && (!this.options.softAlign || this.options.autoMove)) ||
+    if ((!this.options.timingGuide && (!this.options.softAlign || this.options.autoMove)) ||
         s.phase !== 'rally' ||
         s.lastHitter !== 'opponent' || s.ball.vel.z >= -1e-4 ||
         s.ball.pos.z <= PADDLE.homeZ || s.bounces.opponent > 0 || s.bounces.player > 1) {
       this.interceptX = null
-      s.predictionTargetX = null
       this.predictionTimer = 0
       return
     }
@@ -524,7 +515,6 @@ export class PingPongGame {
       this.interceptX = predictPlayerInterceptX(s.ball, s.playerWindowOpen)
       this.predictionTimer = 0.05
     }
-    s.predictionTargetX = this.options.predictionAssist ? this.interceptX : null
   }
 
   /**
@@ -808,7 +798,6 @@ export class PingPongGame {
     s.bounces = { player: 0, opponent: 0 }
     s.lastHitter = null
     s.playerWindowOpen = false
-    s.predictionTargetX = null
     this.interceptX = null
     this.predictionTimer = 0
     this.resetAlign()
@@ -856,7 +845,7 @@ export class PingPongGame {
 
   // ---------------------------------------------------------------- 查询辅助
 
-  /** 预测穿过球拍平面的横向位置；与场景预测标记的显示开关独立。 */
+  /** 预测穿过球拍平面的横向位置。 */
   get predictedInterceptX(): number | null {
     return this.interceptX
   }
