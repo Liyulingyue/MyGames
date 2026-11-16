@@ -536,10 +536,11 @@ console.log('\n=== 提前预测软吸附 ===')
   function prepare(
     ball: Ball,
     bounced: boolean,
-    options: { predictionAssist?: boolean; softAlign?: boolean; autoMove?: boolean } = {},
+    options: { predictionAssist?: boolean; timingGuide?: boolean; softAlign?: boolean; autoMove?: boolean } = {},
   ): PingPongGame {
     const game = new PingPongGame({
       predictionAssist: options.predictionAssist ?? true,
+      timingGuide: options.timingGuide ?? false,
       softAlign: options.softAlign ?? true,
       autoMove: options.autoMove ?? false,
       slowMotion: false,
@@ -621,6 +622,20 @@ console.log('\n=== 提前预测软吸附 ===')
     combinations[2].marker === null && combinations[2].offset > 0)
   assert('同时开启时显示标记且引导与单独软吸附一致',
     combinations[3].marker !== null && Math.abs(combinations[3].offset - combinations[2].offset) < 1e-9)
+
+  const guide = prepare(incoming, false, { predictionAssist: false, timingGuide: true, softAlign: false })
+  const withoutGuide = prepare(incoming, false, { predictionAssist: false, timingGuide: false, softAlign: false })
+  for (let i = 0; i < 18; i++) {
+    guide.step(FIXED_DT)
+    withoutGuide.step(FIXED_DT)
+  }
+  assert('击球提示带独立预测，不显示场景标记或影响球和球拍',
+    guide.predictedInterceptX !== null && guide.state.predictionTargetX === null &&
+      guide.state.playerPaddle.x === withoutGuide.state.playerPaddle.x &&
+      JSON.stringify(guide.state.ball) === JSON.stringify(withoutGuide.state.ball))
+  guide.options.timingGuide = false
+  guide.refreshPrediction()
+  assert('关闭提示带且其他预测关闭时清除预测', guide.predictedInterceptX === null)
 }
 
 // ---------------------------------------------------------------- 1. 停顿不锁死

@@ -60,6 +60,7 @@ export class GameRenderer {
   private cameraPose: CameraPose = { ...DEFAULT_CAMERA }
   /** 每帧跟随球拍带来的横向偏移（米） */
   private panX = 0
+  private readonly projectionPoint = new THREE.Vector3()
 
   private ball: THREE.Mesh
   private playerPaddle: THREE.Group
@@ -204,6 +205,13 @@ export class GameRenderer {
 
   setEnvironment(environment: Environment): void {
     this.setSceneEnvironment(environment)
+  }
+
+  /** 将球拍平面上的横向位置投影到画面；可返回屏幕外坐标。 */
+  projectPaddleX(x: number, y: number): number | null {
+    const point = this.projectionPoint.set(x, y, PADDLE.homeZ).project(this.camera)
+    if (!Number.isFinite(point.x) || point.z < -1 || point.z > 1) return null
+    return (point.x + 1) / 2
   }
 
   /** 把游戏状态同步到场景 */

@@ -189,6 +189,7 @@ export default function App() {
   const [autoSwing, setAutoSwing] = useState(false)
   const [hitJudgment, setHitJudgment] = useState<HitJudgment>('standard')
   const [predictionAssist, setPredictionAssist] = useState(false)
+  const [timingGuide, setTimingGuide] = useState(true)
   const [softAlign, setSoftAlign] = useState(false)
   const [softAlignRange, setSoftAlignRange] = useState(ALIGN_DEFAULT_RANGE)
   /**
@@ -231,6 +232,11 @@ export default function App() {
   const containerRef = useRef<HTMLDivElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
+  const timingGuideElementRef = useRef<HTMLDivElement>(null)
+  const timingWaveRef = useRef<SVGPathElement>(null)
+  const timingTargetRef = useRef<HTMLDivElement>(null)
+  const timingPaddleRef = useRef<HTMLDivElement>(null)
+  const timingLabelRef = useRef<HTMLSpanElement>(null)
   /** 结算页的「再来一局」按钮：结算后自动聚焦，回车直接能重开 */
   const restartBtnRef = useRef<HTMLButtonElement>(null)
   const retryCameraBtnRef = useRef<HTMLButtonElement>(null)
@@ -264,6 +270,7 @@ export default function App() {
   const autoSwingRef = useRef(autoSwing)
   const hitJudgmentRef = useRef(hitJudgment)
   const predictionAssistRef = useRef(predictionAssist)
+  const timingGuideRef = useRef(timingGuide)
   const softAlignRef = useRef(softAlign)
   const softAlignRangeRef = useRef(softAlignRange)
   const swingSourceRef = useRef(swingSource)
@@ -288,6 +295,7 @@ export default function App() {
   autoSwingRef.current = autoSwing
   hitJudgmentRef.current = hitJudgment
   predictionAssistRef.current = predictionAssist
+  timingGuideRef.current = timingGuide
   softAlignRef.current = softAlign
   softAlignRangeRef.current = softAlignRange
   swingSourceRef.current = swingSource
@@ -557,6 +565,7 @@ export default function App() {
       autoSwing: autoSwingRef.current,
       hitJudgment: hitJudgmentRef.current,
       predictionAssist: predictionAssistRef.current,
+      timingGuide: timingGuideRef.current,
       softAlign: softAlignRef.current,
       softAlignRange: softAlignRangeRef.current,
     })
@@ -652,6 +661,55 @@ export default function App() {
     let wasGameOver = false
     let gestureKey = ''
     const resultControl = new ResultGesture()
+
+    const hideTimingGuide = () => {
+      if (timingGuideElementRef.current) timingGuideElementRef.current.dataset.phase = 'hidden'
+    }
+
+    const updateTimingGuide = () => {
+      const element = timingGuideElementRef.current
+      const wave = timingWaveRef.current
+      const target = timingTargetRef.current
+      const paddle = timingPaddleRef.current
+      const label = timingLabelRef.current
+      const intercept = game.predictedInterceptX
+      const eta = game.timeToPaddle
+      const state = game.state
+      if (!element || !wave || !target || !paddle || !label) return
+      if (!timingGuideRef.current || state.phase !== 'rally' || state.lastHitter !== 'opponent' ||
+          intercept === null || eta === null) {
+        hideTimingGuide()
+        return
+      }
+
+      const targetX = renderer.projectPaddleX(intercept, state.playerPaddle.y)
+      const paddleX = renderer.projectPaddleX(state.playerPaddle.x, state.playerPaddle.y)
+      if (targetX === null || paddleX === null) {
+        hideTimingGuide()
+        return
+      }
+      const phase = game.shouldSwing ? 'swing' : eta <= 0.55 ? 'ready' : 'incoming'
+      const offscreen = targetX < 0 ? '左侧画外' : targetX > 1 ? '右侧画外' : ''
+      const text = offscreen ? `预测击球点在${offscreen}` :
+        phase === 'swing' ? '挥拍！' : phase === 'ready' ? '准备挥拍' : '来球'
+      element.dataset.phase = phase
+      element.setAttribute('aria-label', `击球提示：${text}；波峰为预测位置，菱形为球拍位置`)
+      label.textContent = text
+      target.style.left = `${Math.max(0, Math.min(1, targetX)) * 100}%`
+      target.dataset.edge = targetX < 0 ? 'left' : targetX > 1 ? 'right' : ''
+      paddle.style.left = `${Math.max(0, Math.min(1, paddleX)) * 100}%`
+      paddle.dataset.edge = paddleX < 0 ? 'left' : paddleX > 1 ? 'right' : ''
+      const paddleLabel = paddle.querySelector('span')
+      if (paddleLabel) paddleLabel.textContent = paddleX < 0 ? '← 球拍画外' : paddleX > 1 ? '球拍画外 →' : '球拍'
+
+      const peak = targetX * 1000
+      let path = 'M 0 90'
+      for (let x = 0; x <= 1000; x += 10) {
+        const height = 48 * Math.exp(-0.5 * ((x - peak) / 75) ** 2)
+        path += ` L ${x} ${(90 - height).toFixed(1)}`
+      }
+      wave.setAttribute('d', `${path} L 1000 90 Z`)
+    }
 
     /**
      * 在摄像头预览上叠加人体辅助框。
@@ -762,6 +820,7 @@ export default function App() {
       last = now
 
       if (pausedRef.current) {
+        hideTimingGuide()
         lastFreshFrame = now
         resultControl.reset()
         mouse.consumeSwing()
@@ -812,6 +871,7 @@ export default function App() {
           }
         }
         if (cameraFaultRef.current || (!tracker && !devPoseRef.current)) {
+          hideTimingGuide()
           lastFrame = null
           lastFreshFrame = now
           mouse.consumeSwing()
@@ -927,6 +987,7 @@ export default function App() {
       // ---- 渲染 ----
       renderer.sync(game.state)
       renderer.render()
+      updateTimingGuide()
       drawPoseOverlay()
 
       // ---- HUD 刷新（10Hz，避免每帧重渲染 React）----
@@ -1118,6 +1179,7 @@ export default function App() {
     game.options.autoSwing = autoSwing
     game.options.hitJudgment = hitJudgment
     game.options.predictionAssist = predictionAssist
+    game.options.timingGuide = timingGuide
     game.options.softAlign = softAlign
     game.options.softAlignRange = softAlignRange
     game.refreshPrediction()
@@ -1125,7 +1187,7 @@ export default function App() {
       rendererRef.current.sync(game.state)
       rendererRef.current.render()
     }
-  }, [timeScale, autoMove, autoSwing, hitJudgment, predictionAssist, softAlign, softAlignRange])
+  }, [timeScale, autoMove, autoSwing, hitJudgment, predictionAssist, timingGuide, softAlign, softAlignRange])
 
   // 显示尺寸实时生效（只动相机，物理完全不受影响）
   useEffect(() => {
@@ -1279,6 +1341,7 @@ export default function App() {
       }
       return { main: hud.server === 'player' ? '我方发球' : '对手发球', sub: '发球先落发球方，再落接球方', cls: 'prompt' }
     }
+    if (timingGuide) return null
     if (hud.shouldSwing) {
       return { main: '挥 拍 !', sub: '球已过网并在你这边落台，现在出手', cls: 'prompt' }
     }
@@ -1327,6 +1390,7 @@ export default function App() {
               <span>球速：{timeScale.toFixed(2)}x</span>
               <span>击球判定：{HIT_JUDGMENT_LABELS[hitJudgment]}</span>
               <span>辅助预测：{predictionAssist ? '开' : '关'}</span>
+              <span>击球提示带：{timingGuide ? '开' : '关'}</span>
               <span>软吸附：{softAlign ? autoMove ? '自动跟球优先' : `${Math.round(softAlignRange * 100)}cm` : '关'}</span>
               <span>音效：{soundOn ? `${Math.round(soundVolume * 100)}%` : '关闭'}</span>
               <p>静态预览不模拟对局；操作、球速和辅助效果需开始游戏体验。</p>
@@ -1338,9 +1402,17 @@ export default function App() {
         </main>
       )}
 
-      <div className="hud">
+      <div className={`hud ${timingGuide ? 'guidance-on' : ''}`}>
         {screen === 'playing' && (
           <>
+          <div className="timing-guide" ref={timingGuideElementRef} data-phase="hidden" role="img" aria-label="击球提示带">
+            <svg viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
+              <path ref={timingWaveRef} />
+            </svg>
+            <div className="timing-target" ref={timingTargetRef} aria-hidden="true"><span>目标</span>▼</div>
+            <div className="timing-paddle" ref={timingPaddleRef} aria-hidden="true">◆<span>球拍</span></div>
+            <div className="timing-label"><span ref={timingLabelRef}>来球</span></div>
+          </div>
           <div className="scoreboard glass">
             <div className="score-side player">
               <span className="score-label">你</span>
@@ -1765,6 +1837,18 @@ export default function App() {
 
               <div className="setting-group">
                 <div className="setting-group-title">辅助</div>
+
+                <label className="setting switch">
+                  <span>击球提示带</span>
+                  <input
+                    type="checkbox"
+                    checked={timingGuide}
+                    onChange={(e) => setTimingGuide(e.target.checked)}
+                  />
+                </label>
+                <div className="setting-hint">
+                  底边波峰表示预测击球位置，菱形表示球拍；颜色和文字提示来球时机，不改变击球判定。
+                </div>
 
                 <div className="setting">
                   <div className="setting-label">

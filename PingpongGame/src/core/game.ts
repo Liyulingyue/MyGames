@@ -76,6 +76,8 @@ export interface GameOptions {
   hitJudgment?: HitJudgment
   /** 显示预测击球位置，不影响球拍移动 */
   predictionAssist?: boolean
+  /** 为击球提示带计算预测位置，不显示场景标记 */
+  timingGuide?: boolean
   /** 输入位置进入预测击球点附近时吸附；范围单位为米 */
   softAlign?: boolean
   softAlignRange?: number
@@ -161,6 +163,7 @@ export class PingPongGame {
       autoSwing: options.autoSwing ?? false,
       hitJudgment: options.hitJudgment ?? 'standard',
       predictionAssist: options.predictionAssist ?? false,
+      timingGuide: options.timingGuide ?? false,
       softAlign: options.softAlign ?? false,
       softAlignRange: options.softAlignRange ?? ALIGN_DEFAULT_RANGE,
     }
@@ -506,7 +509,7 @@ export class PingPongGame {
 
   private updatePrediction(dt: number, changed: boolean): void {
     const s = this.state
-    if ((!this.options.predictionAssist && (!this.options.softAlign || this.options.autoMove)) ||
+    if ((!this.options.predictionAssist && !this.options.timingGuide && (!this.options.softAlign || this.options.autoMove)) ||
         s.phase !== 'rally' ||
         s.lastHitter !== 'opponent' || s.ball.vel.z >= -1e-4 ||
         s.ball.pos.z <= PADDLE.homeZ || s.bounces.opponent > 0 || s.bounces.player > 1) {
@@ -852,6 +855,11 @@ export class PingPongGame {
   }
 
   // ---------------------------------------------------------------- 查询辅助
+
+  /** 预测穿过球拍平面的横向位置；与场景预测标记的显示开关独立。 */
+  get predictedInterceptX(): number | null {
+    return this.interceptX
+  }
 
   /** 当前是否处于"该挥拍了"的窗口 */
   get shouldSwing(): boolean {

@@ -89,6 +89,108 @@ body {
   pointer-events: auto;
 }
 
+/* ---------------- 击球提示带 ---------------- */
+
+.timing-guide {
+  --guide-color: #4dd4ff;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 92px;
+  pointer-events: none;
+  color: var(--guide-color);
+  transition: opacity 0.12s ease;
+}
+
+.timing-guide[data-phase='hidden'] {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.timing-guide[data-phase='ready'] {
+  --guide-color: #ffb454;
+}
+
+.timing-guide[data-phase='swing'] {
+  --guide-color: #58e08a;
+}
+
+.timing-guide svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.timing-guide path {
+  fill: var(--guide-color);
+  fill-opacity: 0.2;
+  stroke: var(--guide-color);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.timing-target,
+.timing-paddle {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 15px;
+  line-height: 1;
+  text-shadow: 0 1px 5px #000;
+}
+
+.timing-target {
+  top: 20px;
+  color: var(--guide-color);
+}
+
+.timing-paddle {
+  bottom: 7px;
+  color: #fff;
+}
+
+.timing-target span,
+.timing-paddle span {
+  display: block;
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.timing-target[data-edge='left'],
+.timing-paddle[data-edge='left'] {
+  transform: none;
+}
+
+.timing-target[data-edge='right'],
+.timing-paddle[data-edge='right'] {
+  transform: translateX(-100%);
+}
+
+.timing-label {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(7, 11, 22, 0.8);
+  color: var(--guide-color);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.hud.guidance-on .camera-preview {
+  bottom: 100px;
+}
+
+.hud.guidance-on .hints {
+  bottom: 96px;
+}
+
 /* ---------------- 比分牌 ---------------- */
 
 .scoreboard {
@@ -1464,6 +1566,10 @@ input[type='range']:active::-webkit-slider-thumb {
 
   .hints.pose-hints {
     bottom: 150px;
+  }
+
+  .hud.guidance-on .hints.pose-hints {
+    bottom: 232px;
   }
 
   .settings {
