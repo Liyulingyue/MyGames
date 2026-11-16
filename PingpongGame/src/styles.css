@@ -472,6 +472,10 @@ body {
   animation: fade-in 0.25s ease;
 }
 
+.camera-fault {
+  z-index: 5;
+}
+
 .gameover-card {
   display: flex;
   flex-direction: column;

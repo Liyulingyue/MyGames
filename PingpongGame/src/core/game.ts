@@ -23,6 +23,8 @@ import type { CollisionEvent, PaddleHit } from './physics.ts'
 import type { Ball, GameEvent, Paddle, Phase, Score, Side } from './types.ts'
 import { clamp, createRng, lerp, rand } from './vec3.ts'
 
+export type RulesMode = 'casual' | 'standard'
+
 export interface GameOptions {
   /** 随机数种子，固定后整局可复现 */
   seed?: number
@@ -32,6 +34,8 @@ export interface GameOptions {
   aiConfig?: AIConfig
   /** 一局的目标分数 */
   targetScore?: number
+  /** 休闲模式保留原流程；标准模式启用轮换发球和领先两分 */
+  rules?: RulesMode
   /** 慢动作：球逼近我方时放慢，给玩家反应时间 */
   slowMotion?: boolean
   /** 慢动作最低速度倍率 */
@@ -74,6 +78,8 @@ export interface GameOptions {
 
 export interface GameState {
   phase: Phase
+  server: Side
+  serveStage: 'waiting' | 'firstBounce' | 'secondBounce' | null
   ball: Ball
   playerPaddle: Paddle
   opponentPaddle: Paddle
@@ -105,10 +111,7 @@ export interface GameState {
 /**
  * 乒乓对局核心。
  *
- * 回合节奏（与真实乒乓一致，也是本项目要求的流程）：
- *   1. 对手发球 → 球在对手半场落台一次
- *   2. 对手把球打过网 → 球在我方半场落台一次
- *   3. 【我方窗口打开】挥拍回击；命中则继续回合，否则失分
+ * 休闲模式沿用对手开球的简化流程；标准模式按比分轮换发球。
  *
  * 本类不引用任何浏览器 API，可原样运行在 Node 服务端。
  */
@@ -122,7 +125,8 @@ export class PingPongGame {
   private pendingEvents: GameEvent[] = []
   private collisions: CollisionEvent[] = []
   private playerTargetX = 0
-  private serveCount = 0
+  private serveTimer = 0
+  private serveTouchedNet = false
   private predictionTimer = 0
   private interceptX: number | null = null
   private playerBounceAge = 0
@@ -135,6 +139,7 @@ export class PingPongGame {
       ai: preset,
       aiConfig: options.aiConfig ?? AI_PRESETS[preset],
       targetScore: options.targetScore ?? TARGET_SCORE,
+      rules: options.rules ?? 'casual',
       slowMotion: options.slowMotion ?? true,
       slowMotionScale: options.slowMotionScale ?? 0.55,
       slowMotionWindow: options.slowMotionWindow ?? 0.9,
@@ -154,6 +159,8 @@ export class PingPongGame {
 
     this.state = {
       phase: 'idle',
+      server: 'opponent',
+      serveStage: null,
       ball: {
         pos: { x: 0, y: 0.3, z: 0.6 },
         vel: { x: 0, y: 0, z: 0 },
@@ -189,12 +196,14 @@ export class PingPongGame {
   // ---------------------------------------------------------------- 对外接口
 
   /** 开新的一局 */
-  start(): void {
+  start(seed = this.options.seed): void {
+    this.options.seed = seed
     this.rng = createRng(this.options.seed)
     this.state.score = { player: 0, opponent: 0 }
     this.state.elapsed = 0
     this.state.lastPointWinner = null
-    this.serveCount = 0
+    this.accumulator = 0
+    this.pendingEvents.length = 0
 
     // 球拍回到中间，避免新一局开始时球拍还停在上���局的位置
     this.playerTargetX = 0
@@ -206,7 +215,10 @@ export class PingPongGame {
     p.activeTimer = 0
     p.cooldown = 0
     p.swingAnim = 0
-    this.state.opponentPaddle.swingAnim = 0
+    this.ai = createAIState()
+    this.state.opponentPaddle = this.ai.paddle
+    this.state.swingCooldown = 0
+    this.state.swingActiveTimer = 0
     this.state.predictionTargetX = null
     this.interceptX = null
     this.predictionTimer = 0
@@ -247,6 +259,16 @@ export class PingPongGame {
     const p = s.playerPaddle
     if (p.cooldown > 0) return false
 
+    if (this.options.rules === 'standard' && s.phase === 'serve' &&
+        s.server === 'player' && s.serveStage === 'waiting') {
+      p.lastSwingPower = clamp(power, 0, 1)
+      p.swingAnim = 1
+      p.cooldown = PADDLE.swingCooldown
+      this.pendingEvents.push({ type: 'swing', power: p.lastSwingPower })
+      this.launchServe('player', this.pendingEvents)
+      return true
+    }
+
     this.activeHitJudgment = this.options.hitJudgment
     p.activeTimer = HIT_JUDGMENT_PRESETS[this.activeHitJudgment].swingTime
     p.cooldown = PADDLE.swingCooldown
@@ -266,6 +288,10 @@ export class PingPongGame {
    */
   get isGameOver(): boolean {
     return this.state.phase === 'gameover'
+  }
+
+  private get isPoint(): boolean {
+    return this.state.phase === 'point'
   }
 
   /** 推进游戏，返回本帧产生的事件 */
@@ -318,10 +344,9 @@ export class PingPongGame {
     if (s.phase === 'point') {
       s.pointTimer -= dt
       if (s.pointTimer <= 0) {
-        if (
-          s.score.player >= this.options.targetScore ||
-          s.score.opponent >= this.options.targetScore
-        ) {
+        const reachedTarget = Math.max(s.score.player, s.score.opponent) >= this.options.targetScore
+        const enoughLead = Math.abs(s.score.player - s.score.opponent) >= 2
+        if (reachedTarget && (this.options.rules === 'casual' || enoughLead)) {
           s.phase = 'gameover'
           const winner: Side = s.score.player > s.score.opponent ? 'player' : 'opponent'
           events.push({
@@ -338,6 +363,16 @@ export class PingPongGame {
     }
 
     this.updateTimers(dt)
+
+    if (this.options.rules === 'standard' && s.phase === 'serve' && s.serveStage === 'waiting') {
+      if (s.server === 'player') {
+        s.ball.pos.x = clamp(s.playerPaddle.x, -0.5, 0.5)
+      } else {
+        this.serveTimer -= dt
+        if (this.serveTimer <= 0) this.launchServe('opponent', events)
+      }
+      if (s.serveStage === 'waiting') return
+    }
 
     // —— 辅助击球：球进到拍区就自动挥拍（玩家只负责走位）——
     if (this.options.autoSwing) this.tryAutoSwing()
@@ -357,7 +392,9 @@ export class PingPongGame {
     }
 
     // —— 对手 AI ——
-    const action = updateAI(
+    const action = s.phase === 'serve' && this.options.rules === 'standard'
+      ? { kind: 'none' as const }
+      : updateAI(
       this.ai,
       s.ball,
       {
@@ -388,19 +425,54 @@ export class PingPongGame {
     // —— 物理推进 ——
     const collisions = this.collisions
     collisions.length = 0
+    const beforePhysics = { ...s.ball.vel }
     stepBall(s.ball, dt, collisions)
 
     for (const c of collisions) {
       if (c.kind === 'table') {
+        if (this.options.rules === 'standard' && s.phase === 'serve') {
+          if (s.serveStage === 'firstBounce' && c.side === s.server) {
+            s.serveStage = 'secondBounce'
+          } else if (s.serveStage === 'secondBounce' && c.side !== s.server) {
+            if (this.serveTouchedNet) {
+              events.push({ type: 'out', message: '擦网重发' })
+              this.beginServe()
+            } else {
+              s.phase = 'rally'
+              s.serveStage = null
+              s.bounces = { player: 0, opponent: 0 }
+              s.bounces[c.side] = 1
+              s.playerWindowOpen = c.side === 'player'
+            }
+          } else {
+            this.awardPoint(s.server === 'player' ? 'opponent' : 'player', events)
+          }
+          events.push({ type: 'bounce', side: c.side, pos: c.pos })
+          continue
+        }
         s.bounces[c.side]++
         if (c.side === 'player' && s.lastHitter === 'opponent') {
           s.playerWindowOpen = true
         }
         events.push({ type: 'bounce', side: c.side, pos: c.pos })
       } else if (c.kind === 'net') {
+        if (s.phase === 'serve' && this.options.rules === 'standard') {
+          if (s.serveStage === 'firstBounce') {
+            this.awardPoint(s.server === 'player' ? 'opponent' : 'player', events)
+          } else {
+            this.serveTouchedNet = true
+          }
+          if (s.serveStage === 'secondBounce' && c.pos.y + BALL.radius >= TABLE.netHeight) {
+            const direction = Math.sign(beforePhysics.z)
+            s.ball.pos.z = direction * (TABLE.netDepth + BALL.radius)
+            s.ball.vel = { x: beforePhysics.x * 0.75, y: beforePhysics.y * 0.7, z: beforePhysics.z * 0.75 }
+          }
+        }
         events.push({ type: 'netHit', pos: c.pos })
       }
     }
+
+    if (this.isPoint || (s.phase === 'serve' && s.serveStage === 'waiting')) return
 
     // 未挥拍时撞到拍面（被动格挡）
     const velocityX = s.ball.vel.x
@@ -591,7 +663,14 @@ export class PingPongGame {
       Math.abs(s.ball.pos.z) > OUT_OF_BOUNDS.z ||
       s.ball.pos.y < OUT_OF_BOUNDS.y
 
-    // 发球阶段还没有人击球：失误就重发
+    if (this.options.rules === 'standard' && s.phase === 'serve') {
+      if (onFloor || outOfBounds) {
+        this.awardPoint(s.server === 'player' ? 'opponent' : 'player', events)
+      }
+      return
+    }
+
+    // 休闲模式发球阶段还没有人击球：失误就重发
     if (s.lastHitter === null) {
       if (onFloor || outOfBounds || s.bounces.opponent >= 2) {
         events.push({ type: 'out', message: '重发球' })
@@ -659,9 +738,20 @@ export class PingPongGame {
   private beginServe(): void {
     const s = this.state
     s.phase = 'serve'
-    this.serveCount++
-    s.ball.pos = { x: rand(this.rng, -0.35, 0.35), y: 0.34, z: rand(this.rng, 0.5, 0.7) }
-    s.ball.vel = { x: rand(this.rng, -0.25, 0.25), y: -1.7, z: rand(this.rng, 1.1, 1.5) }
+    s.server = this.nextServeSide
+    s.serveStage = this.options.rules === 'standard' ? 'waiting' : null
+    this.serveTouchedNet = false
+    this.serveTimer = 0.8
+    if (this.options.rules === 'standard') {
+      const z = s.server === 'player' ? PADDLE.homeZ : PADDLE.opponentZ
+      const paddle = s.server === 'player' ? s.playerPaddle : s.opponentPaddle
+      const x = clamp(paddle.x, -0.5, 0.5)
+      s.ball.pos = { x, y: PADDLE.homeY, z }
+      s.ball.vel = { x: 0, y: 0, z: 0 }
+    } else {
+      s.ball.pos = { x: rand(this.rng, -0.35, 0.35), y: 0.34, z: rand(this.rng, 0.5, 0.7) }
+      s.ball.vel = { x: rand(this.rng, -0.25, 0.25), y: -1.7, z: rand(this.rng, 1.1, 1.5) }
+    }
     s.ball.spin = 0
     s.bounces = { player: 0, opponent: 0 }
     s.lastHitter = null
@@ -677,6 +767,16 @@ export class PingPongGame {
     this.ai.hasTarget = false
     this.ai.reactionTimer = 0
     this.ai.predictionTimer = 0
+  }
+
+  private launchServe(side: Side, events: GameEvent[]): void {
+    const s = this.state
+    s.serveStage = 'firstBounce'
+    s.lastHitter = side
+    s.ball.vel = { x: rand(this.rng, -0.15, 0.15), y: 1.7, z: side === 'player' ? 2.1 : -2.1 }
+    const paddle = side === 'player' ? s.playerPaddle : s.opponentPaddle
+    paddle.swingAnim = 1
+    events.push({ type: 'paddleHit', side, pos: { ...s.ball.pos }, power: 0.6 })
   }
 
   /** 计算慢动作倍率：球正在飞向我方时逐渐放慢 */
@@ -717,6 +817,13 @@ export class PingPongGame {
 
   /** 下一个发球方（用于 UI 显示） */
   get nextServeSide(): Side {
-    return Math.floor(this.serveCount / SERVE_ROTATION) % 2 === 0 ? 'opponent' : 'player'
+    if (this.options.rules === 'casual') return 'opponent'
+    const { player, opponent } = this.state.score
+    const total = player + opponent
+    const deuceAt = this.options.targetScore - 1
+    const turns = player >= deuceAt && opponent >= deuceAt
+      ? deuceAt + (total - 2 * deuceAt)
+      : Math.floor(total / SERVE_ROTATION)
+    return turns % 2 === 0 ? 'opponent' : 'player'
   }
 }

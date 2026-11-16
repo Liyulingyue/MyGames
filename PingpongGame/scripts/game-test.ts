@@ -10,7 +10,7 @@
  */
 
 import { PingPongGame } from '../src/core/game.ts'
-import { FIXED_DT, PADDLE } from '../src/core/constants.ts'
+import { AI_PRESETS, FIXED_DT, PADDLE } from '../src/core/constants.ts'
 import type { HitJudgment } from '../src/core/constants.ts'
 import { launchTo, predictPlayerInterceptX, stepBall } from '../src/core/physics.ts'
 import type { Ball } from '../src/core/types.ts'
@@ -19,6 +19,121 @@ let failures = 0
 function assert(name: string, ok: boolean, detail = ''): void {
   if (!ok) failures++
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : `  ${detail}`}`)
+}
+
+console.log('=== 对局规则与发球 ===')
+{
+  const game = new PingPongGame({ rules: 'standard', slowMotion: false, pointDelay: 0, seed: 1 })
+  game.start()
+  const bounces: string[] = []
+  for (let i = 0; i < 600 && bounces.length < 2; i++) {
+    for (const event of game.step(1 / 120)) {
+      if (event.type === 'bounce' && event.side) bounces.push(event.side)
+    }
+  }
+  assert('对手发球先落对方、再落我方并打开接球窗口',
+    bounces.join(',') === 'opponent,player' && game.state.phase === 'rally' && game.state.playerWindowOpen)
+
+  function prepareScore(player: number, opponent: number): void {
+    game.state.score = { player, opponent }
+    game.state.phase = 'point'
+    game.state.pointTimer = 0
+    game.step(0.01)
+  }
+  prepareScore(1, 1)
+  assert('两分后轮到玩家发球并等待挥拍',
+    game.state.server === 'player' && game.state.serveStage === 'waiting')
+  const waitingBall = { ...game.state.ball.pos }
+  for (let i = 0; i < 120; i++) game.step(1 / 120)
+  assert('等待发球不会自动计分或移动球',
+    game.state.serveStage === 'waiting' && game.state.score.player === 1 &&
+      game.state.ball.pos.z === waitingBall.z)
+  assert('玩家挥拍发球', game.swing())
+  const playerBounces: string[] = []
+  for (let i = 0; i < 600 && playerBounces.length < 2; i++) {
+    for (const event of game.step(1 / 120)) {
+      if (event.type === 'bounce' && event.side) playerBounces.push(event.side)
+    }
+  }
+  assert('玩家发球先落我方、再落对方', playerBounces.join(',') === 'player,opponent')
+
+  prepareScore(2, 2)
+  assert('四分后轮回对手发球', game.state.server === 'opponent')
+  prepareScore(10, 10)
+  assert('10:10 未结束，下一球由对手发球',
+    !game.isGameOver && game.state.server === 'opponent')
+  prepareScore(11, 10)
+  assert('11:10 未结束，平分后每球换发',
+    !game.isGameOver && game.state.server === 'player')
+  prepareScore(11, 11)
+  assert('11:11 再次换发', !game.isGameOver && game.state.server === 'opponent')
+  prepareScore(12, 10)
+  assert('领先两分后结束', game.isGameOver)
+
+  const fault = new PingPongGame({ rules: 'standard', slowMotion: false })
+  fault.start()
+  fault.state.ball.pos = { x: 0, y: -0.75, z: 1 }
+  fault.state.ball.vel = { x: 0, y: -1, z: 0 }
+  fault.state.serveStage = 'firstBounce'
+  fault.state.lastHitter = 'opponent'
+  fault.step(0.01)
+  assert('标准模式发球失败判发球方失分',
+    fault.state.score.player === 1 && fault.state.score.opponent === 0)
+
+  const earlyNet = new PingPongGame({ rules: 'standard', slowMotion: false })
+  earlyNet.start()
+  earlyNet.state.serveStage = 'firstBounce'
+  earlyNet.state.lastHitter = 'opponent'
+  earlyNet.state.ball.pos = { x: 0, y: 0.1, z: 0.001 }
+  earlyNet.state.ball.vel = { x: 0, y: 0, z: -2 }
+  earlyNet.step(0.01)
+  assert('发球在己方落台前触网判失分', earlyNet.state.score.player === 1)
+
+  const miss = new PingPongGame({
+    rules: 'standard', slowMotion: false, pointDelay: 0,
+    aiConfig: { ...AI_PRESETS.normal, missChance: 1 },
+  })
+  miss.start()
+  miss.state.score = { player: 2, opponent: 0 }
+  miss.state.phase = 'point'
+  miss.state.pointTimer = 0
+  miss.step(0.01)
+  miss.swing()
+  for (let i = 0; i < 1000 && miss.state.score.player === 2; i++) miss.step(1 / 120)
+  assert('标准模式对手接发球漏接由玩家得分',
+    miss.state.score.player === 3 && miss.state.score.opponent === 0)
+
+  const letServe = new PingPongGame({ rules: 'standard', slowMotion: false })
+  letServe.start()
+  letServe.state.score = { player: 1, opponent: 1 }
+  letServe.state.server = 'player'
+  letServe.state.serveStage = 'secondBounce'
+  letServe.state.lastHitter = 'player'
+  letServe.state.ball.pos = { x: 0, y: 0.16, z: -0.001 }
+  letServe.state.ball.vel = { x: 0, y: 0, z: 2.1 }
+  const serveStage = () => letServe.state.serveStage
+  for (let i = 0; i < 300 && serveStage() !== 'waiting'; i++) letServe.step(1 / 120)
+  assert('发球擦网后合法落台重发且不改变发球方或比分',
+    serveStage() === 'waiting' && letServe.state.server === 'player' &&
+      letServe.state.score.player === 1 && letServe.state.score.opponent === 1)
+
+  const seeded = new PingPongGame({ rules: 'standard', slowMotion: false })
+  const serveVelocity = (seed?: number): number => {
+    seeded.start(seed)
+    for (let i = 0; i < 120 && seeded.state.serveStage === 'waiting'; i++) seeded.step(1 / 120)
+    return seeded.state.ball.vel.x
+  }
+  const firstVelocity = serveVelocity(17)
+  assert('固定种子可复现发球，新种子改变发球',
+    serveVelocity() === firstVelocity && serveVelocity(18) !== firstVelocity)
+
+  const casual = new PingPongGame({ pointDelay: 0 })
+  casual.start()
+  casual.state.score = { player: 11, opponent: 10 }
+  casual.state.phase = 'point'
+  casual.state.pointTimer = 0
+  casual.step(0.01)
+  assert('默认休闲模式保留先到目标分数即结束', casual.isGameOver)
 }
 
 console.log('=== 对手挥拍动画 ===')

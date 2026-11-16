@@ -295,6 +295,10 @@ export class PoseTracker {
     return this.lastFrame
   }
 
+  get cameraLive(): boolean {
+    return !!this.stream?.getVideoTracks().some((track) => track.readyState === 'live')
+  }
+
   /** 注入原始关键点（null = 恢复真实摄像头数据） */
   setFakeLandmarks(landmarks: NormalizedLandmark[] | null): void {
     this.fakeLandmarks = landmarks
@@ -426,8 +430,10 @@ export class PoseTracker {
     let result
     try {
       result = landmarker.detectForVideo(video, now)
-    } catch {
-      return null
+    } catch (error) {
+      this.lastFrame = null
+      this.lastLandmarks = null
+      throw new Error(`姿态检测失败：${error instanceof Error ? error.message : String(error)}`)
     }
 
     const landmarks = result.landmarks?.[0]

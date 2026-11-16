@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { PingPongGame } from './core/game.ts'
+import type { RulesMode } from './core/game.ts'
 import { AI_PRESETS, HIT_JUDGMENT_PRESETS, PADDLE, PLAYER, TARGET_SCORE } from './core/constants.ts'
 import type { HitJudgment } from './core/constants.ts'
 import type { Phase, Side } from './core/types.ts'
@@ -14,6 +15,8 @@ import { KeyboardController } from './input/keyboard.ts'
 import { MouseController } from './input/mouse.ts'
 import { SoundEngine } from './input/sound.ts'
 import { SettingsPreview } from './SettingsPreview.tsx'
+import { ResultGesture } from './input/resultGesture.ts'
+import type { ResultAction } from './input/resultGesture.ts'
 
 type InputMode = 'keyboard' | 'pose' | 'mouse'
 type Difficulty = 'easy' | 'normal' | 'hard'
@@ -72,6 +75,8 @@ interface DevPose {
 interface HudState {
   score: { player: number; opponent: number }
   phase: Phase
+  server: Side
+  serveStage: 'waiting' | 'firstBounce' | 'secondBounce' | null
   fps: number
   timeScale: number
   shouldSwing: boolean
@@ -100,6 +105,8 @@ interface HudState {
 const INITIAL_HUD: HudState = {
   score: { player: 0, opponent: 0 },
   phase: 'idle',
+  server: 'opponent',
+  serveStage: null,
   fps: 0,
   timeScale: 1,
   shouldSwing: false,
@@ -169,6 +176,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('menu')
   const [inputMode, setInputMode] = useState<InputMode>('keyboard')
   const [difficulty, setDifficulty] = useState<Difficulty>('normal')
+  const [rules, setRules] = useState<RulesMode>('casual')
   const [swingThreshold, setSwingThreshold] = useState<number>(PLAYER.swingThreshold)
   const [slowMotion, setSlowMotion] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
@@ -208,6 +216,10 @@ export default function App() {
   const [bootError, setBootError] = useState<string | null>(null)
   const [booting, setBooting] = useState(false)
   const [loadProgress, setLoadProgress] = useState<PoseLoadProgress | null>(null)
+  const [cameraFault, setCameraFault] = useState<string | null>(null)
+  const [resultGesture, setResultGesture] = useState<{ action: ResultAction | null; progress: number }>({
+    action: null, progress: 0,
+  })
 
   /**
    * 比分变化计数：谁的分数变了就把那一侧的 key 换掉，
@@ -221,6 +233,7 @@ export default function App() {
   const overlayRef = useRef<HTMLCanvasElement>(null)
   /** 结算页的「再来一局」按钮：结算后自动聚焦，回车直接能重开 */
   const restartBtnRef = useRef<HTMLButtonElement>(null)
+  const retryCameraBtnRef = useRef<HTMLButtonElement>(null)
   const settingsBtnRef = useRef<HTMLButtonElement>(null)
   const exitDialogRef = useRef<HTMLDialogElement>(null)
   const restoreMenuFocusRef = useRef(false)
@@ -243,6 +256,8 @@ export default function App() {
   const slowMotionRef = useRef(slowMotion)
   const swingThresholdRef = useRef(swingThreshold)
   const difficultyRef = useRef(difficulty)
+  const rulesRef = useRef(rules)
+  const cameraFaultRef = useRef<string | null>(null)
   const showPoseOverlayRef = useRef(showPoseOverlay)
   const timeScaleRef = useRef(timeScale)
   const autoMoveRef = useRef(autoMove)
@@ -266,6 +281,7 @@ export default function App() {
   slowMotionRef.current = slowMotion
   swingThresholdRef.current = swingThreshold
   difficultyRef.current = difficulty
+  rulesRef.current = rules
   showPoseOverlayRef.current = showPoseOverlay
   timeScaleRef.current = timeScale
   autoMoveRef.current = autoMove
@@ -292,6 +308,21 @@ export default function App() {
   const switchInputMode = useCallback((mode: InputMode) => {
     inputModeRef.current = mode
     setInputMode(mode)
+    if (mode !== 'pose') {
+      if (cameraFaultRef.current) {
+        cameraGenerationRef.current++
+        pendingTrackerRef.current?.close()
+        pendingTrackerRef.current = null
+        cameraSetupPromiseRef.current = null
+        setBooting(false)
+        setLoadProgress(null)
+        trackerRef.current?.videoElement?.remove()
+        trackerRef.current?.close()
+        trackerRef.current = null
+      }
+      cameraFaultRef.current = null
+      setCameraFault(null)
+    }
     if (!speedTouchedRef.current) {
       setTimeScale(mode === 'pose' ? POSE_DEFAULT_TIME_SCALE : NORMAL_DEFAULT_TIME_SCALE)
     }
@@ -405,6 +436,17 @@ export default function App() {
 
   cameraSetupRef.current = setupCamera
 
+  const retryCamera = useCallback(async () => {
+    trackerRef.current?.videoElement?.remove()
+    trackerRef.current?.close()
+    trackerRef.current = null
+    const ok = await setupCamera()
+    if (ok) {
+      cameraFaultRef.current = null
+      setCameraFault(null)
+    }
+  }, [setupCamera])
+
   const startGame = useCallback(async () => {
     const generation = ++startGenerationRef.current
     // 浏览器规定 AudioContext 必须在用户手势里解锁，否则一直是挂起状态
@@ -437,11 +479,17 @@ export default function App() {
   const restartGame = useCallback(() => {
     const game = gameRef.current
     if (!game) return
-    game.start()
+    game.start(Math.floor(Math.random() * 1e9))
+    keyboardRef.current?.reset()
+    mouseRef.current?.reset()
+    detectorRef.current?.reset()
+    setResultGesture({ action: null, progress: 0 })
     setHud((h) => ({
       ...h,
       score: { player: 0, opponent: 0 },
-      phase: 'rally',
+      phase: game.state.phase,
+      server: game.state.server,
+      serveStage: game.state.serveStage,
       message: null,
       messageKind: null,
       gameOver: null,
@@ -463,6 +511,9 @@ export default function App() {
     setScreen('menu')
     setShowSettings(false)
     setHud(INITIAL_HUD)
+    cameraFaultRef.current = null
+    setCameraFault(null)
+    setResultGesture({ action: null, progress: 0 })
   }, [])
 
   const leaveSettingsPage = useCallback(() => {
@@ -491,6 +542,7 @@ export default function App() {
       seed: Math.floor(Math.random() * 1e9),
       ai: difficultyRef.current,
       targetScore: TARGET_SCORE,
+      rules: rulesRef.current,
       slowMotion: slowMotionRef.current,
       timeScale: timeScaleRef.current,
       autoMove: autoMoveRef.current,
@@ -588,6 +640,10 @@ export default function App() {
     let lastPhase = ''
     /** 最近一帧姿态数据（真实摄像头或调试注入） */
     let lastFrame: PoseFrame | null = null
+    let lastFreshFrame = performance.now()
+    let wasGameOver = false
+    let gestureKey = ''
+    const resultControl = new ResultGesture()
 
     /**
      * 在摄像头预览上叠加人体辅助框。
@@ -698,6 +754,8 @@ export default function App() {
       last = now
 
       if (pausedRef.current) {
+        lastFreshFrame = now
+        resultControl.reset()
         mouse.consumeSwing()
         ensureKeyboard().clearKeys()
         if (messageUntil) messageUntil += frameElapsed
@@ -725,16 +783,66 @@ export default function App() {
           video.style.transform = 'scaleX(-1)'
         }
         // devPoseRef 只在开发调试时注入数据，正常运行时是 null
-        const frame = devPoseRef.current ?? tracker?.detect(now)
-        lastFrame = frame ?? null
+        let frame: PoseFrame | null | undefined
+        if (!cameraFaultRef.current) {
+          try {
+            if (!devPoseRef.current && tracker?.videoElement && !tracker.cameraLive) {
+              throw new Error('摄像头已断开')
+            }
+            frame = devPoseRef.current ?? tracker?.detect(now)
+            if (frame) lastFreshFrame = now
+            else if (tracker && now - lastFreshFrame > 2000) throw new Error('摄像头画面超过 2 秒没有更新')
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            cameraFaultRef.current = message
+            setCameraFault(message)
+            setHud((h) => ({
+              ...h, cameraState: 'error', cameraError: message, hasPerson: false,
+              bodyPos: 0.5, armSeen: false, armSource: null, swingSpeed: 0, swingVert: 0,
+            }))
+            detector.reset()
+          }
+        }
+        if (cameraFaultRef.current || (!tracker && !devPoseRef.current)) {
+          lastFrame = null
+          lastFreshFrame = now
+          mouse.consumeSwing()
+          ensureKeyboard().clearKeys()
+          renderer.render()
+          raf = requestAnimationFrame(loop)
+          return
+        }
+        if (frame) lastFrame = frame
         if (frame) {
-          if (frame.hasPerson) {
+          const resultScreen = game.isGameOver
+          if (resultScreen) {
+            if (!wasGameOver) resultControl.reset()
+            const gesture = resultControl.update(tracker?.landmarks ?? null, now)
+            const progress = Math.floor(gesture.progress * 10) * 10
+            const key = `${gesture.action}:${progress}`
+            if (key !== gestureKey) {
+              gestureKey = key
+              setResultGesture({ action: gesture.action, progress })
+            }
+            if (gesture.confirmed) {
+              resultControl.reset()
+              if (gesture.action === 'restart') {
+                detector.reset()
+                restartGame()
+              } else if (gesture.action === 'menu') {
+                backToMenu()
+                return
+              }
+            }
+          } else if (frame.hasPerson) {
             // 绝对映射：人在画面里的位置 → 球拍位置（零点 = 摄像头画面正中）
             const target = paddleTargetFromPose(frame, PLAYER.xRange)
             game.setPlayerTarget(target.x)
           }
 
-          if (isMouseSwing(swingSourceRef.current)) {
+          if (resultScreen) {
+            mouse.consumeSwing()
+          } else if (isMouseSwing(swingSourceRef.current)) {
             // 体感 + 鼠标击球：走位看身体，击球用鼠标左键
             if (mouseSwing) game.swing(0.75)
           } else {
@@ -744,9 +852,11 @@ export default function App() {
           }
         }
       } else if (inputModeRef.current === 'mouse') {
+        lastFreshFrame = now
         game.setPlayerTarget(mouseTarget.x)
         if (mouseSwing) game.swing(0.75)
       } else {
+        lastFreshFrame = now
         const keyboard = ensureKeyboard()
         const target = keyboard.update(dt)
         game.setPlayerTarget(target.x)
@@ -754,7 +864,9 @@ export default function App() {
       }
 
       // ---- 推进游戏 ----
+      wasGameOver = game.isGameOver
       const events = game.step(dt)
+      if (!wasGameOver && game.isGameOver) resultControl.reset()
       // 发球提示：进入 serve 阶段时响一声
       if (game.state.phase === 'serve' && lastPhase !== 'serve') sound.play('serve')
       lastPhase = game.state.phase
@@ -824,14 +936,15 @@ export default function App() {
       if (hudTimer >= 0.1) {
         hudTimer = 0
         const s = game.state
-        const tracker = trackerRef.current
-        const frame = lastFrame ?? tracker?.frame
+        const frame = inputModeRef.current === 'pose' ? lastFrame : null
         // HUD 显示的必须是"实际参与判定"的那条手臂，否则会和手感对不上
         const sample = frame ? pickArmSample(frame, handOf(swingSourceRef.current)) : null
         setHud((h) => ({
           ...h,
           score: { ...s.score },
           phase: s.phase,
+          server: s.server,
+          serveStage: s.serveStage,
           fps,
           timeScale: s.timeScale,
           shouldSwing: game.shouldSwing,
@@ -860,7 +973,7 @@ export default function App() {
       rendererRef.current = null
       gameRef.current = null
     }
-  }, [screen, ensureKeyboard, ensureDetector, ensureMouse, ensureSound, attachCameraPreview])
+  }, [screen, ensureKeyboard, ensureDetector, ensureMouse, ensureSound, attachCameraPreview, restartGame, backToMenu])
 
   useEffect(() => {
     keyboardRef.current?.clearKeys()
@@ -902,6 +1015,10 @@ export default function App() {
     if (hud.gameOver) restartBtnRef.current?.focus()
   }, [hud.gameOver])
 
+  useEffect(() => {
+    if (cameraFault) retryCameraBtnRef.current?.focus()
+  }, [cameraFault])
+
   /**
    * 全局快捷键 + 点面板外关闭设置：
    * - Esc：先关掉设置面板；结算页再按 Esc 回主菜单
@@ -910,6 +1027,7 @@ export default function App() {
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (cameraFaultRef.current) return
       const target = e.target as HTMLElement | null
       // 焦点在按钮/滑块里时，回车交给控件自己处理，避免重复触发
       const inControl = !!target?.closest?.('button, input, select, textarea')
@@ -1144,6 +1262,12 @@ export default function App() {
     }
     if (hud.phase === 'gameover') {
       return { main: '本局结束', sub: '在右上角设置里可以重新开始', cls: 'prompt' }
+    }
+    if (rules === 'standard' && hud.phase === 'serve') {
+      if (hud.server === 'player' && hud.serveStage === 'waiting') {
+        return { main: '轮到你发球', sub: '移动球拍选择发球位置，然后挥拍', cls: 'prompt' }
+      }
+      return { main: hud.server === 'player' ? '我方发球' : '对手发球', sub: '发球先落发球方，再落接球方', cls: 'prompt' }
     }
     if (hud.shouldSwing) {
       return { main: '挥 拍 !', sub: '球已过网并在你这边落台，现在出手', cls: 'prompt' }
@@ -1401,6 +1525,18 @@ export default function App() {
 
               <div className="setting-group">
                 <div className="setting-group-title">操作</div>
+
+                <div className="setting">
+                  <div className="setting-label"><span>对局规则</span></div>
+                  <div className="seg">
+                    {([['casual', '休闲'], ['standard', '标准']] as const).map(([value, label]) => (
+                      <button key={value} className={rules === value ? 'active' : ''}
+                        aria-pressed={rules === value} disabled={screen === 'playing'}
+                        onClick={() => setRules(value)}>{label}</button>
+                    ))}
+                  </div>
+                  <div className="setting-hint">休闲保持原有对手开球；标准双方换发，平分后需领先两分。对局中不能更换规则。</div>
+                </div>
 
                 <div className="setting">
                   <div className="setting-label">
@@ -1797,12 +1933,31 @@ export default function App() {
                 <div className="gameover-hint">
                   {hud.gameOver.winner === 'player' ? '打得不错' : '再来一局？'}
                 </div>
+                {inputMode === 'pose' && (
+                  <div className="gameover-hint" aria-live="polite">
+                    先放下双手，再举左手重开或举右手返回首页，保持 1.8 秒
+                    {resultGesture.action && ` · ${resultGesture.action === 'restart' ? '重开' : '返回'} ${resultGesture.progress}%`}
+                  </div>
+                )}
                 <button className="start-btn" ref={restartBtnRef} onClick={restartGame}>
                   再来一局 <kbd>Enter</kbd>
                 </button>
                 <button className="ghost-btn" onClick={backToMenu}>
                   返回主菜单 <kbd>Esc</kbd>
                 </button>
+              </div>
+            </div>
+          )}
+          {cameraFault && inputMode === 'pose' && (
+            <div className="gameover camera-fault" role="alertdialog" aria-modal="true" aria-labelledby="camera-fault-title">
+              <div className="gameover-card">
+                <h2 id="camera-fault-title">体感中断，比赛已暂停</h2>
+                <p>{cameraFault}</p>
+                <button ref={retryCameraBtnRef} className="start-btn" onClick={() => void retryCamera()} disabled={booting}>
+                  {booting ? '正在重新连接…' : '重新连接摄像头'}
+                </button>
+                <button className="ghost-btn" onClick={() => switchInputMode('keyboard')}>切换到键盘并继续</button>
+                <button className="ghost-btn" onClick={backToMenu}>返回首页</button>
               </div>
             </div>
           )}
@@ -1869,14 +2024,25 @@ export default function App() {
 
             {inputMode === 'pose' && <div className="menu-options">{poseOptions}</div>}
 
+            <div className="setting">
+              <div className="setting-label"><span>对局规则</span></div>
+              <div className="seg">
+                {([['casual', '休闲'], ['standard', '标准']] as const).map(([value, label]) => (
+                  <button key={value} className={rules === value ? 'active' : ''}
+                    aria-pressed={rules === value} onClick={() => setRules(value)}>{label}</button>
+                ))}
+              </div>
+              <div className="setting-hint">{rules === 'casual' ? '对手开球，先到 11 分获胜' : '双方轮流发球，平分后领先两分获胜'}</div>
+            </div>
+
             <div className="flow">
-              <span className="flow-step">对手发球</span>
+              <span className="flow-step">{rules === 'casual' ? '对手发球' : '双方轮流发球'}</span>
               <span className="flow-arrow">→</span>
-              <span className="flow-step">对方区弹一次</span>
+              <span className="flow-step">{rules === 'casual' ? '对方区弹一次' : '发球方落台'}</span>
               <span className="flow-arrow">→</span>
-              <span className="flow-step">我方区弹一次</span>
+              <span className="flow-step">{rules === 'casual' ? '我方区弹一次' : '接球方落台'}</span>
               <span className="flow-arrow">→</span>
-              <span className="flow-step">你挥拍回击</span>
+              <span className="flow-step">{rules === 'casual' ? '你挥拍回击' : '接球方回击'}</span>
             </div>
 
             {bootError && <div className="start-error">{bootError}</div>}

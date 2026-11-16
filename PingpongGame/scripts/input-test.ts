@@ -39,7 +39,7 @@ function installWindowStub(): {
   return {
     window,
     dispatch(type, key) {
-      for (const fn of handlers.get(type) ?? []) fn({ key, repeat: false })
+      for (const fn of handlers.get(type) ?? []) fn({ key, repeat: false, preventDefault() {} })
     },
   }
 }
@@ -54,6 +54,8 @@ const { paddleTargetFromPose, SwingDetector, handOf, isMouseSwing } = await impo
 import type { PoseFrame } from '../src/input/poseTracker.ts'
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import { PADDLE } from '../src/core/constants.ts'
+import { ResultGesture } from '../src/input/resultGesture.ts'
+import { LANDMARK } from '../src/input/poseTracker.ts'
 
 let failures = 0
 
@@ -61,6 +63,37 @@ function approx(name: string, actual: number, expected: number, tol = 1e-6): voi
   const ok = Math.abs(actual - expected) <= tol
   if (!ok) failures++
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  期望 ≈${expected}，实际 ${actual}`}`)
+}
+
+console.log('=== 结算手势 ===')
+{
+  const pose = (leftUp: boolean, rightUp: boolean): NormalizedLandmark[] => {
+    const points = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.6, z: 0, visibility: 1 }))
+    points[LANDMARK.LEFT_SHOULDER].y = 0.4
+    points[LANDMARK.RIGHT_SHOULDER].y = 0.4
+    points[LANDMARK.LEFT_WRIST].y = leftUp ? 0.2 : 0.6
+    points[LANDMARK.RIGHT_WRIST].y = rightUp ? 0.2 : 0.6
+    return points
+  }
+  const gesture = new ResultGesture()
+  let time = 0
+  let result = gesture.update(pose(true, false), time)
+  for (let i = 0; i < 20; i++) result = gesture.update(pose(true, false), time += 100)
+  approx('结算前已举手不会直接确认', Number(result.confirmed || result.progress > 0), 0)
+  gesture.update(pose(false, false), time += 100)
+  for (let i = 0; i < 18; i++) result = gesture.update(pose(true, false), time += 100)
+  approx('不足保持时间不会重开', Number(result.confirmed), 0)
+  result = gesture.update(pose(true, false), time += 100)
+  approx('左手保持 1.8 秒确认重开', Number(result.confirmed && result.action === 'restart'), 1)
+  gesture.update(pose(false, false), time += 100)
+  for (let i = 0; i < 19; i++) result = gesture.update(pose(false, true), time += 100)
+  approx('右手保持 1.8 秒确认返回', Number(result.confirmed && result.action === 'menu'), 1)
+  gesture.update(pose(false, false), time += 100)
+  gesture.update(pose(true, false), time += 100)
+  result = gesture.update(pose(true, false), time += 2000)
+  approx('丢帧或后台中断不能累计保持时间', Number(result.confirmed || result.progress > 0), 0)
+  result = gesture.update(pose(true, true), time += 100)
+  approx('双手同时举起不触发操作', Number(result.action !== null), 0)
 }
 
 /** 按住某个键若干帧，返回球拍目标 */
@@ -102,6 +135,10 @@ console.log('=== 键盘映射 ===')
 
   const keyboard = new KeyboardController()
   const detach = keyboard.attach()
+  dispatch('keydown', ' ')
+  dispatch('keyup', ' ')
+  approx('空格在两帧之间按下并松开仍能触发挥拍', Number(keyboard.consumeSwing()), 1)
+  approx('一次空格只触发一次挥拍', Number(keyboard.consumeSwing()), 0)
   dispatch('keydown', 'ArrowRight')
   const beforePause = keyboard.update(0.1).x
   keyboard.clearKeys()
@@ -705,6 +742,29 @@ console.log('\n=== 摄像头退出清理 ===')
     if (previous) Object.defineProperty(globalThis, 'navigator', previous)
     else Reflect.deleteProperty(globalThis, 'navigator')
   }
+}
+
+console.log('\n=== 摄像头运行时状态 ===')
+{
+  const { PoseTracker } = await import('../src/input/poseTracker.ts')
+  const tracker = new PoseTracker()
+  const track = { readyState: 'live' }
+  Object.defineProperty(tracker, 'stream', { value: { getVideoTracks: () => [track] }, writable: true })
+  approx('摄像头采集轨道存活时可用', Number(tracker.cameraLive), 1)
+  track.readyState = 'ended'
+  approx('摄像头采集轨道结束时不可用', Number(tracker.cameraLive), 0)
+  Object.defineProperty(tracker, 'video', { value: { readyState: 2, currentTime: 1 }, writable: true })
+  Object.defineProperty(tracker, 'landmarker', {
+    value: { detectForVideo: () => { throw new Error('test failure') } }, writable: true,
+  })
+  let message = ''
+  try {
+    tracker.detect(100)
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error)
+  }
+  approx('姿态检测异常向上报告而不是静默忽略', Number(message.includes('test failure')), 1)
+  approx('检测异常不保留旧结果', Number(tracker.frame === null && tracker.landmarks === null), 1)
 }
 
 console.log(failures === 0 ? '\n全部通过' : `\n失败 ${failures} 项`)

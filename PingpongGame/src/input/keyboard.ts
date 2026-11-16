@@ -13,6 +13,7 @@ import { PADDLE } from '../core/constants.ts'
 
 export class KeyboardController {
   private keys = new Set<string>()
+  private swingQueued = false
   private targetX = 0
   private speed = 1.1
 
@@ -22,12 +23,15 @@ export class KeyboardController {
       if (e.repeat) return
       if (e.target && (e.target as HTMLElement).closest?.('button, input, select, textarea, [contenteditable="true"]')) return
       this.keys.add(e.key.toLowerCase())
-      if (e.key === ' ') e.preventDefault()
+      if (e.key === ' ') {
+        this.swingQueued = true
+        e.preventDefault()
+      }
     }
     const onUp = (e: KeyboardEvent) => {
       this.keys.delete(e.key.toLowerCase())
     }
-    const onBlur = () => this.keys.clear()
+    const onBlur = () => this.clearKeys()
 
     window.addEventListener('keydown', onDown)
     window.addEventListener('keyup', onUp)
@@ -59,19 +63,18 @@ export class KeyboardController {
 
   /** 本帧是否请求挥拍 */
   consumeSwing(): boolean {
-    if (this.keys.has(' ')) {
-      this.keys.delete(' ')
-      return true
-    }
-    return false
+    const queued = this.swingQueued
+    this.swingQueued = false
+    return queued
   }
 
   clearKeys(): void {
     this.keys.clear()
+    this.swingQueued = false
   }
 
   reset(): void {
     this.targetX = 0
-    this.keys.clear()
+    this.clearKeys()
   }
 }
