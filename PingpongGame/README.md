@@ -500,6 +500,50 @@ npm run test:game    # 行为回归：停顿不锁球拍、高度自动跟随、
 npm run test:view    # 取景回归：默认取景不变、显示尺寸不碰相机、相机位姿可调、滑块范围不崩
 ```
 
+### Docker 部署
+
+目录里带了一套现成的容器配置：**多阶段构建 + nginx 托管静态产物**，对外端口 **16083**。
+
+| 文件 | 作用 |
+| --- | --- |
+| `Dockerfile` | `node:22-bookworm-slim` 构建（`npm ci` → `npm run build`），产物拷进 `nginx:alpine` |
+| `nginx.conf` | 静态托管 + SPA 兜底 + gzip + `assets/` 长缓存 |
+| `docker-compose.yml` | 服务 `pingpong-game`，端口映射 `16083:80` |
+
+```bash
+cd PingpongGame
+sudo docker-compose up -d --build     # 构建并后台启动
+sudo docker-compose logs -f            # 看日志
+sudo docker-compose down               # 停止
+```
+
+启动后访问 **http://localhost:16083**（局域网内换成宿主机 IP）。
+
+> 构建阶段用 Debian 而不是 alpine：TypeScript 7 是原生二进制，
+> npm 上的官方可选依赖只有 glibc 版本，alpine(musl) 上装不了。
+>
+> 镜像是"构建产物 + nginx"，不包含 `node_modules`；
+> `npm ci` 需要在构建时能访问 npm 源。
+
+**关于摄像头（体感模式）**：浏览器只在**安全上下文**（HTTPS 或 `localhost`）下开放
+`getUserMedia`，所以：
+
+- 在跑 Docker 的那台机器上用 `http://localhost:16083` 打开 → 摄像头可用；
+- 从别的机器用 `http://<宿主机IP>:16083` 打开 → 摄像头**不可用**，
+  只能玩鼠标 / 键盘模式（体感模式会在开始界面提示并回退到键盘）；
+- 需要跨机器玩体感模式时，把容器端口转发到本机再走 localhost：
+
+  ```bash
+  ssh -L 16083:localhost:16083 user@<宿主机IP>
+  # 之后在浏览器打开 http://localhost:16083
+  ```
+
+  或者用 mkcert 签发本地证书，把 nginx 换成 443 + 证书挂载。
+
+另外，MediaPipe 的 wasm 和姿态模型是**运行时从 CDN 拉的**
+（`cdn.jsdelivr.net` / `storage.googleapis.com`），
+客户端机器需要能访问外网，否则体感模式初始化会失败（鼠标 / 键盘模式不受影响）。
+
 ### 无头模拟
 
 `scripts/simulate.ts` 直接跑 `src/core`，不经过浏览器，用来验证规则闭环：

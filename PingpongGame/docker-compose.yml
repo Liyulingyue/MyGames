@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  pingpong-game:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pingpong-game:latest
+    container_name: pingpong-game
+    restart: unless-stopped
+    ports:
+      - "16083:80"
