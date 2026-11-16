@@ -74,6 +74,7 @@ export class GameRenderer {
   private readonly trailSamples = Array.from({ length: TRAIL_LENGTH }, () => new THREE.Vector3())
   private trailHistoryHead = -1
   private trailHistoryCount = 0
+  private trailServeId: number | null = null
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -239,6 +240,11 @@ export class GameRenderer {
    * 球慢下来的时候拖尾收掉（否则静止的球也挂着一团光，像贴纸）。
    */
   private updateTrail(state: GameState): void {
+    if (this.trailServeId !== state.serveId) {
+      this.trailServeId = state.serveId
+      this.trailHistoryHead = -1
+      this.trailHistoryCount = 0
+    }
     const speed = Math.hypot(state.ball.vel.x, state.ball.vel.y, state.ball.vel.z)
 
     this.trailHistoryHead = (this.trailHistoryHead + 1) % this.trailHistory.length

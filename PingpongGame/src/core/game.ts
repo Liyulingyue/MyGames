@@ -80,6 +80,8 @@ export interface GameState {
   phase: Phase
   server: Side
   serveStage: 'waiting' | 'firstBounce' | 'secondBounce' | null
+  /** 每次发球准备时递增，供渲染层识别球的位置重置 */
+  serveId: number
   ball: Ball
   playerPaddle: Paddle
   opponentPaddle: Paddle
@@ -161,6 +163,7 @@ export class PingPongGame {
       phase: 'idle',
       server: 'opponent',
       serveStage: null,
+      serveId: 0,
       ball: {
         pos: { x: 0, y: 0.3, z: 0.6 },
         vel: { x: 0, y: 0, z: 0 },
@@ -366,7 +369,8 @@ export class PingPongGame {
 
     if (this.options.rules === 'standard' && s.phase === 'serve' && s.serveStage === 'waiting') {
       if (s.server === 'player') {
-        s.ball.pos.x = clamp(s.playerPaddle.x, -0.5, 0.5)
+        s.ball.pos.x = s.playerPaddle.x
+        s.ball.pos.y = s.playerPaddle.y
         if (this.options.autoSwing) {
           this.serveTimer -= dt
           if (this.serveTimer <= 0) this.swing(0.6)
@@ -481,7 +485,10 @@ export class PingPongGame {
     // 未挥拍时撞到拍面（被动格挡）
     const velocityX = s.ball.vel.x
     const velocityY = s.ball.vel.y
-    this.passivePaddleContact('player', events)
+    // 发球刚从本方拍面出发，不能立即再次触发被动碰撞。
+    if (!(this.options.rules === 'standard' && s.phase === 'serve' && s.server === 'player')) {
+      this.passivePaddleContact('player', events)
+    }
 
     // —— 规则判定 ——
     this.checkRules(events)
@@ -742,6 +749,7 @@ export class PingPongGame {
   private beginServe(): void {
     const s = this.state
     s.phase = 'serve'
+    s.serveId++
     s.server = this.nextServeSide
     s.serveStage = this.options.rules === 'standard' ? 'waiting' : null
     this.serveTouchedNet = false
@@ -749,8 +757,7 @@ export class PingPongGame {
     if (this.options.rules === 'standard') {
       const z = s.server === 'player' ? PADDLE.homeZ : PADDLE.opponentZ
       const paddle = s.server === 'player' ? s.playerPaddle : s.opponentPaddle
-      const x = clamp(paddle.x, -0.5, 0.5)
-      s.ball.pos = { x, y: PADDLE.homeY, z }
+      s.ball.pos = { x: paddle.x, y: paddle.y, z }
       s.ball.vel = { x: 0, y: 0, z: 0 }
     } else {
       s.ball.pos = { x: rand(this.rng, -0.35, 0.35), y: 0.34, z: rand(this.rng, 0.5, 0.7) }
@@ -777,7 +784,13 @@ export class PingPongGame {
     const s = this.state
     s.serveStage = 'firstBounce'
     s.lastHitter = side
-    s.ball.vel = { x: rand(this.rng, -0.15, 0.15), y: 1.7, z: side === 'player' ? 2.1 : -2.1 }
+    const x = s.ball.pos.x
+    // 边线向台内引导，并补偿起球高度，保证辅助发球落在双方半场。
+    s.ball.vel = {
+      x: (clamp(x, -0.5, 0.5) - x) * 2 + rand(this.rng, -0.15, 0.15),
+      y: 1.7 + (PADDLE.homeY - s.ball.pos.y) * 2.3,
+      z: side === 'player' ? 2.1 : -2.1,
+    }
     const paddle = side === 'player' ? s.playerPaddle : s.opponentPaddle
     paddle.swingAnim = 1
     events.push({ type: 'paddleHit', side, pos: { ...s.ball.pos }, power: 0.6 })

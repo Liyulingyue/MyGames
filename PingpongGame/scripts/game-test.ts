@@ -48,6 +48,12 @@ console.log('=== 对局规则与发球 ===')
   assert('等待发球不会自动计分或移动球',
     game.state.serveStage === 'waiting' && game.state.score.player === 1 &&
       game.state.ball.pos.z === waitingBall.z)
+  game.setPlayerTarget(PADDLE.rangeX)
+  for (let i = 0; i < 120; i++) game.step(1 / 120)
+  assert('等待发球时球随球拍移动至边线',
+    Math.abs(game.state.ball.pos.x - game.state.playerPaddle.x) < 1e-6 &&
+      Math.abs(game.state.ball.pos.y - game.state.playerPaddle.y) < 1e-6 &&
+      game.state.playerPaddle.x > 0.9)
   assert('玩家挥拍发球', game.swing())
   const playerBounces: string[] = []
   for (let i = 0; i < 600 && playerBounces.length < 2; i++) {
@@ -73,6 +79,41 @@ console.log('=== 对局规则与发球 ===')
   }
   assert('辅助击球自动发球一次并保持合法落台',
     autoServeHits === 1 && autoBounces.join(',') === 'player,opponent')
+
+  let serveError = ''
+  for (const side of ['player', 'opponent'] as const) {
+    for (const x of [-PADDLE.rangeX, -0.75, -0.5, 0, 0.5, 0.75, PADDLE.rangeX]) {
+      for (const y of [PADDLE.minY, PADDLE.homeY, PADDLE.maxY]) {
+        for (const seed of [5, 17, 911]) {
+          const test = new PingPongGame({ rules: 'standard', slowMotion: false, pointDelay: 0, seed })
+          test.start()
+          const paddle = side === 'player' ? test.state.playerPaddle : test.state.opponentPaddle
+          paddle.x = x
+          paddle.y = y
+          test.setPlayerTarget(x)
+          test.state.score = side === 'player' ? { player: 1, opponent: 1 } : { player: 2, opponent: 2 }
+          test.state.phase = 'point'
+          test.state.pointTimer = 0
+          test.step(FIXED_DT * 2)
+          const aligned = Math.abs(test.state.ball.pos.x - paddle.x) < 1e-6 &&
+            Math.abs(test.state.ball.pos.y - paddle.y) < 1e-6
+          if (side === 'player') test.swing()
+          const bounces: string[] = []
+          for (let i = 0; i < 600 && bounces.length < 2; i++) {
+            for (const event of test.step(1 / 120)) {
+              if (event.type === 'bounce' && event.side) bounces.push(event.side)
+            }
+            if (test.state.phase === 'point') break
+          }
+          const expected = side === 'player' ? 'player,opponent' : 'opponent,player'
+          if (!aligned || bounces.join(',') !== expected) {
+            serveError ||= `side=${side} x=${x} y=${y} seed=${seed} aligned=${aligned} bounces=${bounces}`
+          }
+        }
+      }
+    }
+  }
+  assert('双方发球从拍面出发，覆盖完整横向行程及高低位并合法落台', !serveError, serveError)
 
   prepareScore(2, 2)
   assert('四分后轮回对手发球', game.state.server === 'opponent')
@@ -128,11 +169,13 @@ console.log('=== 对局规则与发球 ===')
   letServe.state.lastHitter = 'player'
   letServe.state.ball.pos = { x: 0, y: 0.16, z: -0.001 }
   letServe.state.ball.vel = { x: 0, y: 0, z: 2.1 }
+  const beforeLet = letServe.state.serveId
   const serveStage = () => letServe.state.serveStage
   for (let i = 0; i < 300 && serveStage() !== 'waiting'; i++) letServe.step(1 / 120)
   assert('发球擦网后合法落台重发且不改变发球方或比分',
     serveStage() === 'waiting' && letServe.state.server === 'player' &&
       letServe.state.score.player === 1 && letServe.state.score.opponent === 1)
+  assert('擦网重发会更新球位置重置标识', letServe.state.serveId === beforeLet + 1)
 
   const seeded = new PingPongGame({ rules: 'standard', slowMotion: false })
   const serveVelocity = (seed?: number): number => {
@@ -143,6 +186,9 @@ console.log('=== 对局规则与发球 ===')
   const firstVelocity = serveVelocity(17)
   assert('固定种子可复现发球，新种子改变发球',
     serveVelocity() === firstVelocity && serveVelocity(18) !== firstVelocity)
+  const serveId = seeded.state.serveId
+  seeded.start()
+  assert('同一实例重新开始也更新球位置重置标识', seeded.state.serveId === serveId + 1)
 
   const casual = new PingPongGame({ pointDelay: 0 })
   casual.start()
