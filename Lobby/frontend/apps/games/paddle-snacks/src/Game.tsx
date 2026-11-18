@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { LobbyClient } from '../../../packages/game-sdk/src/index'
 
 const GRID_SIZE = 20
 const CELL_SIZE = 20
@@ -8,16 +9,9 @@ interface SnakeSegment {
   y: number
 }
 
-interface WSMessage {
-  msg_type: string
-  game_id?: string
-  player_id?: string
-  payload: unknown
-}
-
 export default function Game() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const wsRef = useRef<WebSocket | null>(null)
+  const clientRef = useRef<LobbyClient | null>(null)
   const [connected, setConnected] = useState(false)
   const [snake, setSnake] = useState<SnakeSegment[]>([{ x: 10, y: 10 }])
   const [food, setFood] = useState<SnakeSegment>({ x: 15, y: 15 })
@@ -26,53 +20,24 @@ export default function Game() {
   const [score, setScore] = useState(0)
   const [playerName, setPlayerName] = useState('')
   const [roomId, setRoomId] = useState<string | null>(null)
-  const joinedRef = useRef(false)
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const name = params.get('player') || sessionStorage.getItem('playerName') || 'Player1'
     setPlayerName(name)
 
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      return
-    }
-
-    const ws = new WebSocket('ws://localhost:7080/ws')
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      setConnected(true)
-      if (!joinedRef.current) {
-        ws.send(JSON.stringify({
-          msg_type: 'join_game',
-          payload: { game_type: 'paddle-snacks', player_name: name }
-        }))
-        joinedRef.current = true
-      }
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const msg: WSMessage = JSON.parse(event.data)
-        if (msg.msg_type === 'match_found') {
-          const payload = msg.payload as { room_id: string; player_id: string }
-          setRoomId(payload.room_id)
-        }
-      } catch {
-        console.error('Failed to parse message')
-      }
-    }
-
-    ws.onclose = () => {
-      setConnected(false)
-      joinedRef.current = false
-    }
+    const client = new LobbyClient()
+    clientRef.current = client
+    const offStatus = client.on('status', (s: string) => setConnected(s === 'open'))
+    const offMatch = client.on('match_found', (info: { room_id: string }) => setRoomId(info.room_id))
+    client.connect()
+    // SDK 自带断线自动重连 + 自动重进房，无需手动管理 joined 状态
+    client.joinGame('paddle-snacks', { playerName: name })
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-        wsRef.current = null
-      }
+      offStatus()
+      offMatch()
+      client.disconnect()
+      clientRef.current = null
     }
   }, [])
 

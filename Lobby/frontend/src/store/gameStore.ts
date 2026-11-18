@@ -1,101 +1,19 @@
-import { create } from 'zustand'
+/**
+ * 大厅前端统一连接状态。
+ * 实现已收敛到 @lobby/game-sdk（packages/game-sdk），本文件仅保留旧导入路径的垫片。
+ * 新代码请直接从 game-sdk 导入。
+ */
+import { createLobbyStore } from '../../packages/game-sdk/src/index'
 
-interface WSMessage {
-  msg_type: string
-  game_id?: string
-  player_id?: string
-  payload: unknown
-}
+export const useGameStore = createLobbyStore()
 
-interface GameStore {
-  connected: boolean
-  playerName: string
-  roomId: string | null
-  playerId: string | null
-  ws: WebSocket | null
-  latency: number | null
-  setPlayerName: (name: string) => void
-  connect: (playerName: string) => void
-  disconnect: () => void
-  send: (msg: WSMessage) => void
-}
-
-export const useGameStore = create<GameStore>((set, get) => ({
-  connected: false,
-  playerName: sessionStorage.getItem('playerName') || 'Player1',
-  roomId: null,
-  playerId: null,
-  ws: null,
-  latency: null,
-
-  setPlayerName: (name: string) => {
-    set({ playerName: name })
-  },
-
-  connect: (playerName: string) => {
-    const existingWs = get().ws
-    if (existingWs?.readyState === WebSocket.OPEN) {
-      return
-    }
-
-    const ws = new WebSocket('ws://localhost:7080/ws')
-    let lastPing = 0
-
-    ws.onopen = () => {
-      set({ connected: true, ws, playerName })
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const msg: WSMessage = JSON.parse(event.data)
-        
-        if (msg.msg_type === 'pong') {
-          const payload = msg.payload as { timestamp?: number }
-          if (payload.timestamp) {
-            set({ latency: Date.now() - payload.timestamp })
-          }
-        }
-        
-        if (msg.msg_type === 'match_found') {
-          const payload = msg.payload as { room_id: string; player_id: string }
-          set({ roomId: payload.room_id, playerId: payload.player_id })
-        }
-      } catch {
-        console.error('Failed to parse message')
-      }
-    }
-
-    ws.onclose = () => {
-      set({ connected: false, ws: null, roomId: null, playerId: null, latency: null })
-    }
-
-    ws.onerror = () => {
-      set({ connected: false })
-    }
-
-    set({ ws })
-
-    setInterval(() => {
-      const currentWs = get().ws
-      if (currentWs?.readyState === WebSocket.OPEN) {
-        lastPing = Date.now()
-        currentWs.send(JSON.stringify({ msg_type: 'ping', payload: { timestamp: lastPing } }))
-      }
-    }, 3000)
-  },
-
-  disconnect: () => {
-    const { ws } = get()
-    if (ws) {
-      ws.close()
-    }
-    set({ connected: false, ws: null, roomId: null, playerId: null, latency: null })
-  },
-
-  send: (msg: WSMessage) => {
-    const { ws } = get()
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(msg))
-    }
-  },
-}))
+export type {
+  WSMessage,
+  MessageType,
+  RoomPlayer,
+  MatchFoundInfo,
+  RoomStateInfo,
+  ErrorInfo,
+  LobbyClient,
+  LobbyStoreState,
+} from '../../packages/game-sdk/src/index'
