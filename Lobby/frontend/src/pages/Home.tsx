@@ -185,7 +185,7 @@ export default function Home() {
       </main>
       
       <footer className="p-8 text-center text-gray-400 text-sm border-t border-gray-200 mt-4 bg-white/50">
-        <p>DeepGames Platform · Powered by AI &amp; PaddlePaddle</p>
+        <p>MyGames · AI 游戏平台</p>
       </footer>
     </Layout>
   )

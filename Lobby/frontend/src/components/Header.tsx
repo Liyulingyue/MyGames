@@ -7,7 +7,7 @@ interface HeaderProps {
   showBack?: boolean
 }
 
-export default function Header({ title = 'DeepGames', showBack = false }: HeaderProps) {
+export default function Header({ title = 'MyGames', showBack = false }: HeaderProps) {
   const { connected, latency, connect, disconnect, roomId, playerName, setPlayerName } = useGameStore()
 
   useEffect(() => {

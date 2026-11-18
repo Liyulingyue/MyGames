@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Building DeepGames..."
+echo "Building MyGames..."
 
 echo "1. Building Lobby Backend (Rust)..."
 cd Lobby/backend

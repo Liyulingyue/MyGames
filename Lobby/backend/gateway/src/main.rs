@@ -486,7 +486,7 @@ async fn leaderboard_handler(
 async fn health_handler() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "ok",
-        "service": "deepgames-gateway"
+        "service": "mygames-gateway"
     }))
 }
 
