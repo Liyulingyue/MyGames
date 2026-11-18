@@ -38,7 +38,6 @@ export function usePoseDetection({ videoRef, onDirectionChange, enabled = true }
 
     let totalR = 0, totalG = 0, totalB = 0
     let skinPixels = 0
-    const centerX = Math.floor(canvas.width / 2)
     const centerY = Math.floor(canvas.height / 2)
 
     for (let i = 0; i < data.length; i += 16) {
@@ -57,7 +56,6 @@ export function usePoseDetection({ videoRef, onDirectionChange, enabled = true }
 
       if (isSkin) {
         skinPixels++
-        const x = (i / 4) % canvas.width
         const y = Math.floor((i / 4) / canvas.width)
         if (y > centerY - 50 && y < centerY + 50) {
           totalR += r * 2

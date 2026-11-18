@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Header, Layout, Camera } from '../../components'
-import { useGameStore } from '../../store/gameStore'
 
 const GAME_WIDTH = 400
 const GAME_HEIGHT = 600
@@ -16,17 +15,11 @@ interface Car {
   speed: number
 }
 
-interface PoseResult {
-  direction: string
-  hasPerson: boolean
-  keypoints?: any[]
-}
-
 export default function PoseCars() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   
-  const [score, setScore] = useState(0)
+  const [score, setScore] = useState('0:00')
   const [gameStarted, setGameStarted] = useState(false)
   const [gameOver, setGameOver] = useState(false)
   const [showInstructions, setShowInstructions] = useState(true)
@@ -34,7 +27,7 @@ export default function PoseCars() {
   const [mirrored, setMirrored] = useState(true)
   const [splitRatio, setSplitRatio] = useState(25)
   const [isDragging, setIsDragging] = useState(false)
-  const [steerAngle, setSteerAngle] = useState(0)
+  const [, setSteerAngle] = useState(0)
   
   const playerCarRef = useRef<Car>({ x: GAME_WIDTH / 2, y: GAME_HEIGHT - 100, speed: 5 })
   const enemyCarsRef = useRef<Car[]>([])
@@ -50,7 +43,7 @@ export default function PoseCars() {
     enemyCarsRef.current = []
     steerAngleRef.current = 0
     setSteerAngle(0)
-    setScore(0)
+    setScore('0:00')
     setGameOver(false)
     setGameStarted(false)
     setShowInstructions(true)

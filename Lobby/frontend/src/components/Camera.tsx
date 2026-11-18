@@ -24,7 +24,7 @@ export default function Camera({
   const videoRef = useRef<HTMLVideoElement>(null)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [cameraError, setCameraError] = useState<string | null>(null)
-  const [videoLoaded, setVideoLoaded] = useState(false)
+  const [, setVideoLoaded] = useState(false)
 
   const { poseResult, isDetecting, hasPerson, error, canvasRef } = useMediaPipePose(
     videoRef,

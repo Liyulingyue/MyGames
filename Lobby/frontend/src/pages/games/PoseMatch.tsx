@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Header, Layout, Camera } from '../../components'
-import { useGameStore } from '../../store/gameStore'
-
-const TARGET_WIDTH = 400
-const TARGET_HEIGHT = 400
-
-type PoseName = 't-pose' | 'hands-up' | 'left-arm' | 'right-arm' | 'warrior' | 'tree'
 
 interface TargetPose {
   name: string
@@ -29,7 +23,6 @@ const TARGET_POSES: TargetPose[] = [
 
 export default function PoseMatch() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const { connected } = useGameStore()
   const containerRef = useRef<HTMLDivElement>(null)
   
   const [score, setScore] = useState(0)

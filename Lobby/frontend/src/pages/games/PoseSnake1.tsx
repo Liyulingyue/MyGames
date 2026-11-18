@@ -3,7 +3,6 @@ import { Header, Layout, Camera } from '../../components'
 import { Direction } from '../../hooks/usePoseDetection'
 
 const GRID_SIZE = 25
-const CELL_SIZE = 20
 const GAME_SPEED = 150
 
 interface Point {
@@ -99,12 +98,12 @@ export default function PoseSnake1() {
       case 'ArrowLeft':
       case 'a':
       case 'A':
-        directionRef.current = -0.3
+        directionRef.current = directionToTurn(directionRef.current, 'left')
         break
       case 'ArrowRight':
       case 'd':
       case 'D':
-        directionRef.current = 0.3
+        directionRef.current = directionToTurn(directionRef.current, 'right')
         break
     }
   }, [showInstructions])

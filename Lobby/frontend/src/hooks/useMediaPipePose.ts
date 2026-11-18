@@ -208,16 +208,14 @@ export function useMediaPipePose(
   useEffect(() => {
     if (!enabled || !poseRef.current) return
 
-    const video = videoRef.current
-    if (!video) return
-
     let animationId: number
     let lastSendTime = 0
     const minSendInterval = 100
 
     function sendFrame(timestamp: number) {
       if (timestamp - lastSendTime >= minSendInterval) {
-        if (video.readyState >= 2 && poseRef.current) {
+        const video = videoRef.current
+        if (video && video.readyState >= 2 && poseRef.current) {
           try {
             poseRef.current.send({ image: video })
           } catch (e) {

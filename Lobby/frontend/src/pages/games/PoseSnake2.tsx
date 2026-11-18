@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Header, Layout, Camera } from '../../components'
-import { useGameStore } from '../../store/gameStore'
 import { Direction } from '../../hooks/usePoseDetection'
 
 const CANVAS_WIDTH = 800
@@ -16,10 +15,9 @@ interface Point {
 
 export default function PoseSnake2() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const { connected } = useGameStore()
   
   const [score, setScore] = useState(0)
-  const [playerName, setPlayerName] = useState('')
+  const [, setPlayerName] = useState('')
   const [controlMode, setControlMode] = useState<'pose' | 'keyboard'>('pose')
   const [gameStarted, setGameStarted] = useState(false)
   const [gameOver, setGameOver] = useState(false)
