@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Home from './pages/Home'
+import SnakeArena from './pages/games/SnakeArena'
 import PoseSnake1 from './pages/games/PoseSnake1'
 import PoseSnake2 from './pages/games/PoseSnake2'
 import PoseMatch from './pages/games/PoseMatch'
@@ -11,6 +12,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/games/snake-arena" element={<SnakeArena />} />
         <Route path="/games/pose-snake" element={<PoseSnake1 />} />
         <Route path="/games/pose-snake-2" element={<PoseSnake2 />} />
         <Route path="/games/pose-match" element={<PoseMatch />} />

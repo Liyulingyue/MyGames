@@ -16,7 +16,18 @@ interface Game {
 }
 
 const games: Game[] = [
-  { 
+  {
+    id: 'snake-arena',
+    name: 'Snake Arena 竞技场',
+    players: '1-4',
+    description: '多人实时贪吃蛇 - 主机权威联机，吃食物、躲蛇身，90 秒决胜负',
+    icon: '🕹️',
+    gradient: 'from-sky-400 to-blue-600',
+    path: '/games/snake-arena',
+    instructions: ['方向键 / WASD 控制转向', '吃食物得分，撞墙撞蛇会死亡', '90 秒一局，死后 2 秒复活', '房主是权威主机，其他人输入经大厅中继', '支持单人练习，也可以开房间真人对战'],
+    features: ['多人实时', '主机权威', '断线重连', '排行榜']
+  },
+  {
     id: 'pose-snake', 
     name: 'PoseSnake (四向)', 
     players: '1-1', 
