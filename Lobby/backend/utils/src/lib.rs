@@ -9,11 +9,14 @@ pub enum UtilError {
 }
 
 pub fn generate_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    format!("{:x}-{:x}", duration.as_secs(), duration.subsec_nanos())
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{:x}-{:x}-{:x}", duration.as_secs(), duration.subsec_nanos(), seq)
 }
 
 pub fn clamp(value: f32, min: f32, max: f32) -> f32 {
