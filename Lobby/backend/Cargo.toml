@@ -1,10 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "packages/core/game-engine",
-    "packages/core/protocol",
-    "packages/core/utils",
-    "packages/gateway",
+    "gateway",
+    "protocol",
+    "utils",
 ]
 
 [workspace.package]
