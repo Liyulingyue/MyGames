@@ -95,6 +95,9 @@ SDK 自带：自动重连、断线自动重进房、心跳延迟、花名册维�
 - [x] 输入上行 / 快照下行转发（哑中继模式）
 - [x] game-sdk 收敛为唯一 WS 客户端（三份重复实现已合一）
 - [x] portal 唯一入口（删除 apps/portal 重复入口，根 Vite :5178 即门户）
-- [ ] docker-compose 常驻部署（含 nginx 的 /ws 反代）
-- [ ] 成绩上报统一 REST 接口 + 存储
-- [ ] PingpongGame 以嵌入契约接入大厅（阶段 0：嵌入 + 身份 + 成绩）
+- [x] 成绩上报：`POST /api/scores` + `GET /api/leaderboard`（内存版，重启即清；持久化待 docker-compose 阶段）
+- [x] **SnakeArena（内置参考游戏）**：2-4 人主机权威联机 + 主机掉线无缝迁移 + 排行榜，
+      是"如何在平台上写联机游戏"的标准答案（`frontend/src/games/snake-arena/sim.ts` 纯逻辑可搬服务端）
+- [ ] docker-compose 常驻部署（含 nginx 的 /ws 反代 + 成绩持久化）
+- [ ] 嵌入契约（iframe + postMessage 身份注入），供 PingpongGame 等外部独立游戏接入
+- [ ] 房主中途离开的战局恢复策略（当前：接管者以最后快照续跑，已够用）

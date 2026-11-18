@@ -63,8 +63,9 @@ struct Room {
     id: String,
     game_type: String,
     max_players: usize,
-    /// player_id -> player_name
-    players: HashMap<String, String>,
+    /// (player_id, player_name)，保持加入顺序。
+    /// 花名册顺序必须确定（第一位 = 主机），故用 Vec 而非 HashMap。
+    players: Vec<(String, String)>,
 }
 
 struct Connection {
@@ -233,7 +234,7 @@ async fn join_room(state: &Arc<AppState>, player_id: &str, payload: JoinGamePayl
         match existing {
             Some(r) => {
                 r.players
-                    .insert(player_id.to_string(), payload.player_name.clone());
+                    .push((player_id.to_string(), payload.player_name.clone()));
                 (r.id.clone(), r.max_players)
             }
             None => {
@@ -242,8 +243,7 @@ async fn join_room(state: &Arc<AppState>, player_id: &str, payload: JoinGamePayl
                     .max_players
                     .unwrap_or(DEFAULT_MAX_PLAYERS)
                     .clamp(1, 8);
-                let mut players = HashMap::new();
-                players.insert(player_id.to_string(), payload.player_name.clone());
+                let players = vec![(player_id.to_string(), payload.player_name.clone())];
                 rooms.insert(
                     room_id.clone(),
                     Room {
@@ -310,7 +310,7 @@ async fn leave_room(state: &Arc<AppState>, player_id: &str) -> bool {
     let dissolved = {
         let mut rooms = state.rooms.write().await;
         if let Some(room) = rooms.get_mut(&room_id) {
-            room.players.remove(player_id);
+            room.players.retain(|(id, _)| id != player_id);
         }
         if let Some(conn) = state.conns.write().await.get_mut(player_id) {
             conn.room_id = None;
@@ -384,9 +384,9 @@ async fn broadcast_in(state: &Arc<AppState>, room_id: &str, msg: WSMessage, excl
         match rooms.get(room_id) {
             Some(room) => room
                 .players
-                .keys()
+                .iter()
+                .map(|(id, _)| id.clone())
                 .filter(|id| Some(id.as_str()) != exclude)
-                .cloned()
                 .collect(),
             None => return,
         }
@@ -442,6 +442,7 @@ fn roster_of(room: &Room) -> Vec<RoomPlayerInfo> {
         })
         .collect()
 }
+
 
 /// POST /api/scores：提交成绩，返回名次。内存版：每游戏最多保留 100 条，按分降序。
 async fn submit_score(

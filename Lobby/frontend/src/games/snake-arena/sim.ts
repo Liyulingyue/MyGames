@@ -90,15 +90,25 @@ function randomFreeCell(sim: SimState): Vec2 {
   return { x: 0, y: 0 }
 }
 
-/** 出生点选择：头、第二节（头左侧）、行进前方一格都空闲——杜绝"出生/重生即撞墙"。
- *  场地拥挤时返回 null，由调用方决定兜底。初次出生与重生共用，保证行为一致。 */
+/** 出生点选择：头、第二节（头左侧）、行进前方至少 SPAWN_CLEAR_AHEAD 格都空闲——
+ *  杜绝"出生/重生即撞墙"，并留出反应空间。场地拥挤时返回 null，由调用方兜底。
+ *  初次出生与重生共用，保证行为一致。 */
+const SPAWN_CLEAR_AHEAD = 5
+
 function pickSpawnBody(sim: SimState): Vec2[] | null {
   for (let i = 0; i < 200; i++) {
-    const x = 1 + Math.floor(Math.random() * (GRID_W - 2))
+    const x = 1 + Math.floor(Math.random() * (GRID_W - 2 - SPAWN_CLEAR_AHEAD))
     const y = Math.floor(Math.random() * GRID_H)
     if (!cellFree(sim, x, y)) continue
     if (!cellFree(sim, x - 1, y)) continue
-    if (!cellFree(sim, x + 1, y)) continue
+    let clear = true
+    for (let k = 1; k <= SPAWN_CLEAR_AHEAD; k++) {
+      if (!cellFree(sim, x + k, y)) {
+        clear = false
+        break
+      }
+    }
+    if (!clear) continue
     return [{ x, y }, { x: x - 1, y }]
   }
   return null

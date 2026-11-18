@@ -92,7 +92,7 @@ export class LobbyClient {
   private lastPingSent = 0
   private attempts = 0
   private manualClose = false
-  private lastJoin: { gameType: string; maxPlayers?: number } | null = null
+  private lastJoin: { gameType: string; maxPlayers?: number; playerName?: string } | null = null
   readonly heartbeatIntervalMs: number
   readonly rejoin: boolean
 
@@ -118,9 +118,9 @@ export class LobbyClient {
     ws.onopen = () => {
       this.attempts = 0
       this.emit('status', 'open' satisfies ConnStatus)
-      // 断线重连后自动重进房
+      // 断线重连后自动重进房（带齐身份，名字不回退默认值）
       if (this.rejoin && this.lastJoin) {
-        this.sendJoin(this.lastJoin.gameType, this.lastJoin.maxPlayers)
+        this.sendJoin(this.lastJoin.gameType, this.lastJoin.maxPlayers, this.lastJoin.playerName)
       }
       if (this.heartbeatIntervalMs > 0) this.startHeartbeat()
     }
@@ -152,7 +152,7 @@ export class LobbyClient {
   }
 
   joinGame(gameType: string, opts: { playerName?: string; maxPlayers?: number } = {}): void {
-    this.lastJoin = { gameType, maxPlayers: opts.maxPlayers }
+    this.lastJoin = { gameType, maxPlayers: opts.maxPlayers, playerName: opts.playerName }
     this.sendJoin(gameType, opts.maxPlayers, opts.playerName)
   }
 
