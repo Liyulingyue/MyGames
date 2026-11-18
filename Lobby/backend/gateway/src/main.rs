@@ -1,19 +1,20 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use protocol::{
     ErrorPayload, JoinGamePayload, MatchFoundPayload, MessageType, PeerJoinedPayload,
     PeerLeftPayload, RoomPlayerInfo, RoomStatePayload, RoomSummary, WSMessage,
 };
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
 use utils::generate_id;
@@ -26,6 +27,36 @@ use utils::generate_id;
 struct AppState {
     rooms: RwLock<HashMap<String, Room>>,
     conns: RwLock<HashMap<String, Connection>>,
+    /// 成绩榜：game_type -> 有序成绩（内存版，进程重启即清空；持久化待 docker-compose 阶段）
+    scores: Mutex<HashMap<String, Vec<ScoreEntry>>>,
+}
+
+/// POST /api/scores 请求体
+#[derive(Debug, Deserialize)]
+struct ScoreSubmit {
+    game_type: String,
+    player_name: String,
+    score: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ScoreEntry {
+    player: String,
+    score: u32,
+    /// 提交时间（unix 秒）
+    at: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct LeaderboardQuery {
+    game_type: String,
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 struct Room {
@@ -52,6 +83,7 @@ async fn main() {
     let state = Arc::new(AppState {
         rooms: RwLock::new(HashMap::new()),
         conns: RwLock::new(HashMap::new()),
+        scores: Mutex::new(HashMap::new()),
     });
 
     let cors = CorsLayer::new()
@@ -63,6 +95,8 @@ async fn main() {
         .route("/health", get(health_handler))
         .route("/api/games", get(games_handler))
         .route("/api/rooms", get(rooms_handler))
+        .route("/api/scores", post(submit_score))
+        .route("/api/leaderboard", get(leaderboard_handler))
         .route("/ws", get(websocket_handler))
         .layer(cors)
         .with_state(state);
@@ -409,6 +443,45 @@ fn roster_of(room: &Room) -> Vec<RoomPlayerInfo> {
         .collect()
 }
 
+/// POST /api/scores：提交成绩，返回名次。内存版：每游戏最多保留 100 条，按分降序。
+async fn submit_score(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ScoreSubmit>,
+) -> Json<serde_json::Value> {
+    let name = payload.player_name.trim().to_string();
+    if name.is_empty() || name.len() > 32 || payload.game_type.trim().is_empty() {
+        return Json(serde_json::json!({ "ok": false, "error": "invalid player_name or game_type" }));
+    }
+
+    let mut scores = state.scores.lock().await;
+    let list = scores.entry(payload.game_type.clone()).or_default();
+    list.push(ScoreEntry {
+        player: name,
+        score: payload.score,
+        at: now_secs(),
+    });
+    // 名次 = 比我分高的条数 + 1（先算再排序，避免同分歧义）
+    let rank = 1 + list.iter().filter(|e| e.score > payload.score).count() as u32;
+    list.sort_by(|a, b| b.score.cmp(&a.score).then(a.at.cmp(&b.at)));
+    list.truncate(100);
+
+    info!("score submitted: {} {} -> rank {}", payload.game_type, payload.score, rank);
+    Json(serde_json::json!({ "ok": true, "rank": rank }))
+}
+
+/// GET /api/leaderboard?game_type=X：前 10 名
+async fn leaderboard_handler(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<LeaderboardQuery>,
+) -> Json<serde_json::Value> {
+    let scores = state.scores.lock().await;
+    let entries: Vec<ScoreEntry> = scores
+        .get(&q.game_type)
+        .map(|l| l.iter().take(10).cloned().collect())
+        .unwrap_or_default();
+    Json(serde_json::json!({ "game_type": q.game_type, "entries": entries }))
+}
+
 async fn health_handler() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "ok",
@@ -419,6 +492,7 @@ async fn health_handler() -> Json<serde_json::Value> {
 async fn games_handler() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "games": [
+            {"id": "snake-arena", "name": "Snake Arena", "players": "1-4"},
             {"id": "paddle-snacks", "name": "Paddle Snacks", "players": "1-1"},
             {"id": "paddle-cars", "name": "Paddle Cars", "players": "1-2"},
             {"id": "rl-battle", "name": "RL Battle", "players": "2-4"}
