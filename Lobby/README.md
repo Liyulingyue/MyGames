@@ -44,27 +44,57 @@ WebSocket 消息结构（Rust 侧权威定义在 `backend/protocol/src/lib.rs`�
 
 ```jsonc
 {
-  "msg_type": "join_game",   // ping | pong | join_game | leave_game | game_state
-                             // | player_action | chat | error | match_found | matchmaking
-  "game_id": null,
-  "player_id": null,
+  "msg_type": "join_game",
+  "player_id": null,       // 中继类消息由服务端填上发送者 id
   "payload": {}
 }
 ```
 
+| 消息 | 方向 | 语义 |
+|------|------|------|
+| `ping` / `pong` | C→S / S→C | 心跳，pong 原样回带 payload 供客户端算延迟 |
+| `join_game` | C→S | 进房 `{player_name, game_type, max_players?}`；分配未满房间或新建（容量 1-8，默认 4，由建房者指定） |
+| `match_found` | S→C | 回给本人：`{room_id, player_id, players, max_players}` |
+| `peer_joined` / `peer_left` | S→C | 房内其他人进/出通知 |
+| `room_state` | S→C | 全量花名册广播，每次成员变动推送 |
+| `player_action` | C→S | 输入上行，大厅原样转发给房内其他人（`peer_action`，带来源 id） |
+| `game_state` | C→S | 快照广播（权威主机用），原样转发（带来源 id） |
+| `chat` | C→S | 转发（带来源 id） |
+| `leave_game` | C→S | 退房；房空即解散 |
+| `error` | S→C | `{code, message}` |
+
+REST：`GET /health`、`GET /api/games`、`GET /api/rooms`（当前房间与人数）。
+
+**大厅是哑中继**：不存储任何玩法状态，消息到齐只做转发——模拟与判定永远在游戏侧。
+
 ## 游戏接入指南
 
-1. **取身份**：连接 `ws://<host>:7080/ws`，发送 `join_game { player_name, game_type }`。
-2. **进房**：收到 `match_found`，携带 `room_id` 与 `player_id`。
-3. **实时会话**（可选，规划中）：通过 game-sdk 收发玩家输入与状态快照。
-4. **成绩上报**（规划中）：统一 REST 接口。
+用 `@lobby/game-sdk`（`frontend/packages/game-sdk`），三步：
+
+```ts
+import { LobbyClient } from '…/packages/game-sdk/src'
+
+const client = new LobbyClient()          // 默认连同源 /ws（开发走 vite 代理）
+client.on('match_found',  (info) => console.log(info.room_id, info.players))
+client.on('peer_action',  ({ from, payload }) => game.applyRemoteInput(from, payload))
+client.on('peer_left',    ({ player_id }) => game.removeRemotePlayer(player_id))
+client.connect()
+client.joinGame('your-game', { playerName: 'Alice', maxPlayers: 2 })
+
+client.sendAction({ move: 'left', power: 0.7 })   // 输入上行
+client.sendState({ tick: 42, ball: {...} })       // 快照广播（权威主机）
+```
+
+或直接用 zustand 工厂（大厅 UI 同款）：`createLobbyStore()` → `useGameStore`。
+SDK 自带：自动重连、断线自动重进房、心跳延迟、花名册维护。
 
 ## 已知状态 / 路线图
 
 - [x] 目录化：大厅自包含于本文件夹，根目录不再承载任何构建配置
-- [x] gateway 基础骨架：REST + WS 接入、按 game_type 聚合房间
-- [ ] 真实房间生命周期（容量、满员开局、解散、掉线重连）
-- [ ] 输入上行 / 快照下行转发（哑中继模式）
-- [ ] game-sdk 收敛为唯一 WS 客户端（当前 `frontend/src/store/gameStore.ts` 为重复实现）
-- [ ] portal 合并为前端唯一入口（当前与根 Vite 入口重复）
+- [x] 真实房间生命周期（容量、分配、解散、掉线清理）——双客户端 E2E 全过
+- [x] 输入上行 / 快照下行转发（哑中继模式）
+- [x] game-sdk 收敛为唯一 WS 客户端（三份重复实现已合一）
+- [x] portal 唯一入口（删除 apps/portal 重复入口，根 Vite :5178 即门户）
 - [ ] docker-compose 常驻部署（含 nginx 的 /ws 反代）
+- [ ] 成绩上报统一 REST 接口 + 存储
+- [ ] PingpongGame 以嵌入契约接入大厅（阶段 0：嵌入 + 身份 + 成绩）
