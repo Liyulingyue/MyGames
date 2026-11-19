@@ -54,6 +54,7 @@ WebSocket 消息结构（Rust 侧权威定义在 `backend/protocol/src/lib.rs`�
 |------|------|------|
 | `ping` / `pong` | C→S / S→C | 心跳，pong 原样回带 payload 供客户端算延迟 |
 | `join_game` | C→S | 进房 `{player_name, game_type, max_players?}`；分配未满房间或新建（容量 1-8，默认 4，由建房者指定） |
+| `join_room` | C→S | 定向加入 `{room_id, player_name}`（大厅实时房间的加入按钮）；房间不存在/已满回 error |
 | `match_found` | S→C | 回给本人：`{room_id, player_id, players, max_players}` |
 | `peer_joined` / `peer_left` | S→C | 房内其他人进/出通知 |
 | `room_state` | S→C | 全量花名册广播，每次成员变动推送 |
@@ -137,6 +138,7 @@ client.sendState({ tick: 42, ball: {...} })       // 快照广播（权威主机
 - [x] 成绩上报：`POST /api/scores` + `GET /api/leaderboard`（内存版，重启即清；持久化待 docker-compose 阶段）
 - [x] **SnakeArena（内置参考游戏）**：2-4 人主机权威联机 + 主机掉线无缝迁移 + 排行榜，
       是"如何在平台上写联机游戏"的标准答案（`frontend/src/games/snake-arena/sim.ts` 纯逻辑可搬服务端）
+- [x] 大厅暗色街机主题 + 实时房间一键加入（`join_room` 协议 + `?room=` 参数，E2E 已验证）
 - [ ] docker-compose 常驻部署（含 nginx 的 /ws 反代 + 成绩持久化）
 - [ ] 嵌入契约（iframe + postMessage 身份注入），供 PingpongGame 等外部独立游戏接入
 - [ ] 房主中途离开的战局恢复策略（当前：接管者以最后快照续跑，已够用）
