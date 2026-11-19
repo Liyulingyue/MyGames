@@ -31,6 +31,7 @@ pub enum MessageType {
     Ping,
     Pong,
     JoinGame,
+    JoinRoom,
     LeaveGame,
     MatchFound,
     PeerJoined,
@@ -76,6 +77,13 @@ pub struct JoinGamePayload {
     pub game_type: String,
     #[serde(default)]
     pub max_players: Option<usize>,
+}
+
+/// 客户端 → 服务端：按 id 加入指定房间（大厅"实时房间"列表的加入按钮）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinRoomPayload {
+    pub room_id: String,
+    pub player_name: String,
 }
 
 /// 服务端 → 客户端：进房成功（回给发起者本人）。

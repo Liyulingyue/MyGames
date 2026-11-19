@@ -10,8 +10,8 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use protocol::{
-    ErrorPayload, JoinGamePayload, MatchFoundPayload, MessageType, PeerJoinedPayload,
-    PeerLeftPayload, RoomPlayerInfo, RoomStatePayload, RoomSummary, WSMessage,
+    ErrorPayload, JoinGamePayload, JoinRoomPayload, MatchFoundPayload, MessageType,
+    PeerJoinedPayload, PeerLeftPayload, RoomPlayerInfo, RoomStatePayload, RoomSummary, WSMessage,
 };
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -191,8 +191,27 @@ async fn handle_text(state: &Arc<AppState>, player_id: &str, raw: &[u8]) -> Resu
         }
         MessageType::JoinGame => {
             match serde_json::from_value::<JoinGamePayload>(msg.payload) {
-                Ok(payload) => join_room(state, player_id, payload).await,
+                Ok(payload) => join_room(state, player_id, payload, None).await,
                 Err(e) => send_error(state, player_id, "bad_join", &e.to_string()).await,
+            }
+        }
+        MessageType::JoinRoom => {
+            // 指定房间加入（大厅"实时房间"列表）：复用进房流程，房间不存在/已满回 error
+            match serde_json::from_value::<JoinRoomPayload>(msg.payload) {
+                Ok(p) => {
+                    join_room(
+                        state,
+                        player_id,
+                        JoinGamePayload {
+                            player_name: p.player_name,
+                            game_type: String::new(),
+                            max_players: None,
+                        },
+                        Some(p.room_id),
+                    )
+                    .await
+                }
+                Err(e) => send_error(state, player_id, "bad_join_room", &e.to_string()).await,
             }
         }
         MessageType::LeaveGame => {
@@ -220,52 +239,82 @@ async fn handle_text(state: &Arc<AppState>, player_id: &str, raw: &[u8]) -> Resu
     Ok(())
 }
 
-/// 加入 game_type 对应的未满房间；没有就新建，容量由首位（建房）玩家指定。
-async fn join_room(state: &Arc<AppState>, player_id: &str, payload: JoinGamePayload) {
+/// 加入房间。target=None：按 game_type 自动分配未满房间，没有就新建（容量由首位玩家指定）；
+/// target=Some(id)：加入指定房间（"实时房间"加入按钮），不存在/已满则回 error。
+async fn join_room(
+    state: &Arc<AppState>,
+    player_id: &str,
+    payload: JoinGamePayload,
+    target: Option<String>,
+) {
     // 先退旧房（内部自持锁），再拿 rooms 写锁分房，避免嵌套获取同一把锁
     leave_room(state, player_id).await;
 
-    let (room_id, max_players) = {
+    let joined: Result<(String, usize, String), (String, String)> = {
         let mut rooms = state.rooms.write().await;
-        let existing = rooms
-            .values_mut()
-            .find(|r| r.game_type == payload.game_type && r.players.len() < r.max_players);
 
-        match existing {
-            Some(r) => {
-                r.players
-                    .push((player_id.to_string(), payload.player_name.clone()));
-                (r.id.clone(), r.max_players)
+        if let Some(room_id) = target.as_ref() {
+            match rooms.get_mut(room_id) {
+                Some(r) if r.players.len() < r.max_players => {
+                    r.players
+                        .push((player_id.to_string(), payload.player_name.clone()));
+                    Ok((r.id.clone(), r.max_players, r.game_type.clone()))
+                }
+                Some(_) => Err(("room_full".to_string(), "房间已满".to_string())),
+                None => Err((
+                    "room_not_found".to_string(),
+                    "房间不存在或已解散".to_string(),
+                )),
             }
-            None => {
-                let room_id = generate_id();
-                let max = payload
-                    .max_players
-                    .unwrap_or(DEFAULT_MAX_PLAYERS)
-                    .clamp(1, 8);
-                let players = vec![(player_id.to_string(), payload.player_name.clone())];
-                rooms.insert(
-                    room_id.clone(),
-                    Room {
-                        id: room_id.clone(),
-                        game_type: payload.game_type.clone(),
-                        max_players: max,
-                        players,
-                    },
-                );
-                info!(
-                    "Room {} created for {} (max {})",
-                    room_id, payload.game_type, max
-                );
-                (room_id, max)
+        } else {
+            let existing = rooms
+                .values_mut()
+                .find(|r| r.game_type == payload.game_type && r.players.len() < r.max_players);
+
+            match existing {
+                Some(r) => {
+                    r.players
+                        .push((player_id.to_string(), payload.player_name.clone()));
+                    Ok((r.id.clone(), r.max_players, r.game_type.clone()))
+                }
+                None => {
+                    let room_id = generate_id();
+                    let max = payload
+                        .max_players
+                        .unwrap_or(DEFAULT_MAX_PLAYERS)
+                        .clamp(1, 8);
+                    let players = vec![(player_id.to_string(), payload.player_name.clone())];
+                    rooms.insert(
+                        room_id.clone(),
+                        Room {
+                            id: room_id.clone(),
+                            game_type: payload.game_type.clone(),
+                            max_players: max,
+                            players,
+                        },
+                    );
+                    info!(
+                        "Room {} created for {} (max {})",
+                        room_id, payload.game_type, max
+                    );
+                    Ok((room_id, max, payload.game_type.clone()))
+                }
             }
         }
     }; // rooms 写锁在此释放
 
+    let (room_id, max_players, game_type) = match joined {
+        Ok(v) => v,
+        Err((code, message)) => {
+            send_error(state, player_id, &code, &message).await;
+            return;
+        }
+    };
+
     if let Some(conn) = state.conns.write().await.get_mut(player_id) {
         conn.room_id = Some(room_id.clone());
     }
-    info!("Player {} joined room {}", player_id, room_id);
+    info!("Player {} joined room {} ({})", player_id, room_id, game_type);
 
     // 回给本人（花名册此刻再取一次，短暂持读锁）
     let roster = {
