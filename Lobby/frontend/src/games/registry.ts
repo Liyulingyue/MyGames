@@ -20,6 +20,8 @@ export interface GameEntry {
   url?: string
   instructions?: string[]
   features?: string[]
+  /** 支持 ?room= 定向进房（大厅"实时房间"加入按钮） */
+  supportsRoomJoin?: boolean
 }
 
 export const GAMES: GameEntry[] = [
@@ -34,6 +36,7 @@ export const GAMES: GameEntry[] = [
     path: '/games/snake-arena',
     instructions: ['方向键 / WASD 控制转向', '吃食物得分，撞墙撞蛇会死亡', '90 秒一局，死后 2 秒复活', '房主是权威主机，其他人输入经大厅中继', '支持单人练习，也可以开房间真人对战'],
     features: ['多人实时', '主机权威', '断线重连', '排行榜'],
+    supportsRoomJoin: true,
   },
   {
     id: 'pingpong',

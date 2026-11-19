@@ -4,154 +4,173 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============ 暗色街机主题 ============ */
+
 body {
-  font-family: 'Poppins', sans-serif;
-  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #cbd5e1 100%);
+  font-family: 'Poppins', 'Microsoft YaHei', sans-serif;
+  background: #0b1120;
+  color: #e2e8f0;
   min-height: 100vh;
 }
 
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0b1120; }
+::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #334155; }
+
 .bg-grid {
-  background-image: 
-    linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
-  background-size: 40px 40px;
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.045) 1px, transparent 1px);
+  background-size: 42px 42px;
 }
 
 .glass-card {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(59, 130, 246, 0.1);
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.12);
 }
 
+/* 游戏海报卡：暗底 + 悬浮霓虹辉光 + 扫光 */
 .game-card {
-  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-  border: 1px solid rgba(59, 130, 246, 0.12);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: linear-gradient(160deg, #101a2e 0%, #0d1425 100%);
+  border: 1px solid rgba(56, 189, 248, 0.14);
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
 }
 
 .game-card:hover {
-  transform: translateY(-6px);
-  border-color: rgba(59, 130, 246, 0.35);
-  box-shadow: 0 12px 40px rgba(59, 130, 246, 0.2);
+  transform: translateY(-8px) scale(1.01);
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow:
+    0 0 0 1px rgba(56, 189, 248, 0.25),
+    0 18px 50px rgba(56, 189, 248, 0.22),
+    0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
+.game-card::after {
+  /* 悬浮扫光 */
+  content: '';
+  position: absolute;
+  top: 0; left: -80%;
+  width: 60%; height: 100%;
+  background: linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.14) 50%, transparent 100%);
+  transform: skewX(-18deg);
+  transition: left 0.6s ease;
+  pointer-events: none;
+}
+
+.game-card:hover::after { left: 130%; }
+
 .game-card:hover .game-icon {
-  transform: scale(1.15) rotate(5deg);
+  transform: scale(1.18) rotate(-6deg);
+  filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.55));
 }
 
 .game-icon {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
-  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.35);
+  background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+  box-shadow: 0 4px 18px rgba(56, 189, 248, 0.35);
   transition: all 0.3s ease;
 }
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.5);
+  box-shadow: 0 8px 28px rgba(99, 102, 241, 0.55);
 }
 
-.btn-primary:active {
-  transform: translateY(0);
-}
+.btn-primary:active { transform: translateY(0); }
 
 .btn-secondary {
-  background: rgba(59, 130, 246, 0.08);
-  border: 1px solid rgba(59, 130, 246, 0.2);
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #7dd3fc;
   transition: all 0.3s ease;
 }
 
 .btn-secondary:hover {
-  background: rgba(59, 130, 246, 0.15);
-  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.5);
 }
 
 .input-field {
-  background: rgba(255, 255, 255, 0.9);
-  border: 2px solid rgba(59, 130, 246, 0.15);
+  background: rgba(15, 23, 42, 0.8);
+  border: 2px solid rgba(56, 189, 248, 0.18);
+  color: #e2e8f0;
   transition: all 0.3s ease;
 }
 
 .input-field:focus {
-  border-color: rgba(59, 130, 246, 0.5);
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.12);
   outline: none;
 }
 
 .text-gradient {
-  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  background: linear-gradient(120deg, #38bdf8 0%, #818cf8 45%, #e879f9 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 .header-gradient {
-  background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
-  border-bottom: 1px solid rgba(59, 130, 246, 0.1);
+  background: rgba(11, 17, 32, 0.85);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.14);
 }
 
 .badge-success {
-  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
-  color: #166534;
-  border: 1px solid rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.14);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.35);
 }
 
 .badge-disconnected {
-  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-  color: #991b1b;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.14);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
 }
 
 .player-count-badge {
-  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-  color: #1e40af;
-  border: 1px solid rgba(59, 130, 246, 0.2);
+  background: rgba(56, 189, 248, 0.12);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.3);
 }
 
 .floating-shapes {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
   pointer-events: none;
   overflow: hidden;
   z-index: 0;
 }
 
-.shape {
-  position: absolute;
-  opacity: 0.08;
-}
+.shape { position: absolute; opacity: 0.10; filter: blur(2px); }
 
 .shape-1 {
-  top: 5%;
-  right: 5%;
-  width: 300px;
-  height: 300px;
-  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  top: 5%; right: 5%;
+  width: 300px; height: 300px;
+  background: linear-gradient(135deg, #0ea5e9, #8b5cf6);
   border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
   animation: float 8s ease-in-out infinite;
 }
 
 .shape-2 {
-  bottom: 10%;
-  left: 5%;
-  width: 200px;
-  height: 200px;
+  bottom: 10%; left: 5%;
+  width: 200px; height: 200px;
   background: linear-gradient(135deg, #f97316, #f43f5e);
   border-radius: 50% 50% 30% 70% / 60% 40% 60% 40%;
   animation: float 6s ease-in-out infinite reverse;
 }
 
 .shape-3 {
-  top: 50%;
-  left: 60%;
-  width: 150px;
-  height: 150px;
+  top: 50%; left: 60%;
+  width: 150px; height: 150px;
   background: linear-gradient(135deg, #22c55e, #10b981);
   border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
   animation: float 7s ease-in-out infinite;
@@ -166,6 +185,62 @@ body {
 .section-line {
   width: 4px;
   height: 28px;
-  background: linear-gradient(180deg, #3b82f6, #8b5cf6);
+  background: linear-gradient(180deg, #38bdf8, #a78bfa);
   border-radius: 2px;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.6);
+}
+
+/* ============ 大厅动效 ============ */
+
+/* Hero 流动渐变 */
+.hero-animated {
+  background: linear-gradient(115deg, #0c4a6e 0%, #4c1d95 35%, #831843 65%, #0c4a6e 100%);
+  background-size: 220% 220%;
+  animation: heroShift 16s ease infinite;
+}
+
+@keyframes heroShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* Hero 漂浮元素 */
+.float-icon {
+  position: absolute;
+  animation: floatY 6s ease-in-out infinite;
+  user-select: none;
+  pointer-events: none;
+}
+
+@keyframes floatY {
+  0%, 100% { transform: translateY(0) rotate(-4deg); }
+  50% { transform: translateY(-16px) rotate(6deg); }
+}
+
+/* 卡片入场 */
+.rise-in {
+  opacity: 0;
+  animation: riseIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(18px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 数字脉冲 */
+.pulse-num {
+  animation: pulseNum 2.4s ease-in-out infinite;
+}
+
+@keyframes pulseNum {
+  0%, 100% { text-shadow: 0 0 12px rgba(56, 189, 248, 0.35); }
+  50% { text-shadow: 0 0 26px rgba(56, 189, 248, 0.75); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-animated, .float-icon, .rise-in, .pulse-num, .shape {
+    animation: none !important;
+  }
+  .rise-in { opacity: 1; }
 }

@@ -52,32 +52,30 @@ export default function Header({ title = 'MyGames', showBack = false }: HeaderPr
               value={playerName}
               onChange={e => setPlayerName(e.target.value)}
               placeholder="玩家名称"
-              className="px-4 py-2 rounded-xl text-gray-800 placeholder-gray-400 text-sm w-32"
+              className="px-4 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-100 placeholder-slate-500 text-sm w-32 focus:border-sky-500 focus:outline-none transition-colors"
             />
             <button
               onClick={handleConnect}
               className={`px-4 py-2 rounded-xl font-bold text-white text-sm whitespace-nowrap ${
-                connected ? 'bg-gray-400 hover:bg-gray-500' : 'bg-primary-500 hover:bg-primary-600'
+                connected ? 'bg-slate-700 hover:bg-slate-600' : 'btn-primary'
               }`}
             >
               {connected ? '断开连接' : '连接服务器'}
             </button>
             <div className="flex flex-col items-center">
               <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${
-                connected 
-                  ? 'bg-green-100 text-green-700' 
-                  : 'bg-red-100 text-red-600'
+                connected ? 'badge-success' : 'badge-disconnected'
               }`}>
                 {connected ? '🟢 已连接' : '🔴 未连接'}
               </span>
               {connected && roomId && (
-                <span className="text-xs text-gray-500 mt-1 font-medium">房间: {roomId.slice(0, 8)}</span>
+                <span className="text-xs text-slate-400 mt-1 font-medium">房间: {roomId.slice(0, 8)}</span>
               )}
             </div>
           </div>
           {connected && latency !== null && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-200">
-              <span className="text-blue-600 font-semibold text-sm">延迟: {latency}ms</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-sky-500/10 border border-sky-500/30">
+              <span className="text-sky-300 font-semibold text-sm">延迟: {latency}ms</span>
             </div>
           )}
         </div>

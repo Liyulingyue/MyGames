@@ -66,13 +66,18 @@ export default function SnakeArena() {
   const [summary, setSummary] = useState<SimSummary>(() => summarize(simRef.current))
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
 
-  // 1) 挂载：接入大厅并进房（StrictMode 双跑由 cleanup 的 disconnect 兜底）
+  // 1) 挂载：接入大厅并进房（?room= 指定房间加入，否则按游戏类型自动分配）
   useEffect(() => {
     const g = useGameStore.getState()
     const name = searchParams.get('player') || g.playerName || 'Player1'
     if (name !== g.playerName) g.setPlayerName(name)
+    const roomParam = searchParams.get('room')
     g.connect()
-    g.joinGame(GAME_TYPE)
+    if (roomParam) {
+      g.joinRoom(roomParam)
+    } else {
+      g.joinGame(GAME_TYPE)
+    }
     return () => {
       useGameStore.getState().disconnect()
     }

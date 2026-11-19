@@ -16,6 +16,7 @@ export type MessageType =
   | 'ping'
   | 'pong'
   | 'join_game'
+  | 'join_room'
   | 'leave_game'
   | 'match_found'
   | 'peer_joined'
@@ -92,7 +93,10 @@ export class LobbyClient {
   private lastPingSent = 0
   private attempts = 0
   private manualClose = false
-  private lastJoin: { gameType: string; maxPlayers?: number; playerName?: string } | null = null
+  private lastJoin:
+    | { kind: 'game'; gameType: string; maxPlayers?: number; playerName?: string }
+    | { kind: 'room'; roomId: string; playerName?: string }
+    | null = null
   readonly heartbeatIntervalMs: number
   readonly rejoin: boolean
 
@@ -120,7 +124,14 @@ export class LobbyClient {
       this.emit('status', 'open' satisfies ConnStatus)
       // 断线重连后自动重进房（带齐身份，名字不回退默认值）
       if (this.rejoin && this.lastJoin) {
-        this.sendJoin(this.lastJoin.gameType, this.lastJoin.maxPlayers, this.lastJoin.playerName)
+        if (this.lastJoin.kind === 'room') {
+          this.send({
+            msg_type: 'join_room',
+            payload: { room_id: this.lastJoin.roomId, player_name: this.lastJoin.playerName ?? 'Player1' },
+          })
+        } else {
+          this.sendJoin(this.lastJoin.gameType, this.lastJoin.maxPlayers, this.lastJoin.playerName)
+        }
       }
       if (this.heartbeatIntervalMs > 0) this.startHeartbeat()
     }
@@ -152,8 +163,17 @@ export class LobbyClient {
   }
 
   joinGame(gameType: string, opts: { playerName?: string; maxPlayers?: number } = {}): void {
-    this.lastJoin = { gameType, maxPlayers: opts.maxPlayers, playerName: opts.playerName }
+    this.lastJoin = { kind: 'game', gameType, maxPlayers: opts.maxPlayers, playerName: opts.playerName }
     this.sendJoin(gameType, opts.maxPlayers, opts.playerName)
+  }
+
+  /** 按 id 加入指定房间（大厅"实时房间"加入按钮）。 */
+  joinRoom(roomId: string, opts: { playerName?: string } = {}): void {
+    this.lastJoin = { kind: 'room', roomId, playerName: opts.playerName }
+    this.send({
+      msg_type: 'join_room',
+      payload: { room_id: roomId, player_name: opts.playerName ?? 'Player1' },
+    })
   }
 
   leaveGame(): void {
@@ -308,6 +328,7 @@ export interface LobbyStoreState {
   connect: (playerName?: string) => void
   disconnect: () => void
   joinGame: (gameType: string, opts?: { maxPlayers?: number }) => void
+  joinRoom: (roomId: string) => void
   leaveGame: () => void
   sendAction: (payload: unknown) => void
   sendState: (payload: unknown) => void
@@ -366,6 +387,8 @@ export function createLobbyStore(opts: CreateLobbyStoreOptions = {}) {
 
       joinGame: (gameType, o) =>
         client.joinGame(gameType, { playerName: get().playerName, maxPlayers: o?.maxPlayers }),
+
+      joinRoom: (roomId) => client.joinRoom(roomId, { playerName: get().playerName }),
 
       leaveGame: () => client.leaveGame(),
 
