@@ -69,7 +69,11 @@ REST：`GET /health`、`GET /api/games`、`GET /api/rooms`（当前房间与人�
 
 ## 游戏接入指南
 
-用 `@lobby/game-sdk`（`frontend/packages/game-sdk`），三步：
+游戏注册表：`frontend/src/games/registry.ts`（内置 + 外接两种类型）。接入分两条路：
+
+### 路线 A：内部游戏（SPA 内路由，要联机）
+
+用 `@lobby/game-sdk`（`frontend/packages/game-sdk`）：
 
 ```ts
 import { LobbyClient } from '…/packages/game-sdk/src'
@@ -85,8 +89,43 @@ client.sendAction({ move: 'left', power: 0.7 })   // 输入上行
 client.sendState({ tick: 42, ball: {...} })       // 快照广播（权威主机）
 ```
 
-或直接用 zustand 工厂（大厅 UI 同款）：`createLobbyStore()` → `useGameStore`。
-SDK 自带：自动重连、断线自动重进房、心跳延迟、花名册维护。
+或直接用 zustand 工厂：`createLobbyStore()` → `useGameStore`。
+参考实现：**SnakeArena**（主机权威联机 + 成绩上报，`src/games/snake-arena/`）。
+
+### 路线 B：外部独立游戏（iframe 嵌入契约，PingpongGame 走这条）
+
+独立站点也能进大厅——**不需要改游戏的技术栈，甚至一行不改也能进**（只是没有身份/成绩）：
+
+1. 在 `registry.ts` 注册：`{ kind: 'external', url: 'http://localhost:5180', ... }`
+2. 玩家点击卡片 → `/games/ext/:id` → iframe 承载，整页跳转（外接页不带 COEP，见下）
+3. （推荐）游戏侧加一行接入脚本，获得身份注入与成绩回传：
+
+```html
+<script src="http://<lobby-host>/lobby-embed.js"></script>
+<script>
+  // LobbyEmbed.player.name 是大厅注入的玩家名；对局结束时报成绩：
+  LobbyEmbed.reportScore(finalScore)
+</script>
+```
+
+**嵌入契约（postMessage，双向）**：
+
+| 方向 | 消息 | 语义 |
+|------|------|------|
+| 大厅 → 游戏 | `{type:'lobby:hello', game_id, player_name}` | 身份注入（iframe onLoad 与收到 ready 时各发一次，另附 `?player=` 查询参数） |
+| 游戏 → 大厅 | `{type:'lobby:ready'}` | 游戏就绪（lobby-embed.js 自动发） |
+| 游戏 → 大厅 | `{type:'lobby:score', score}` | 成绩上报 → 大厅落库 `/api/scores` |
+
+活文档/参考实现：`frontend/public/embed-demo.html`（大厅里点"嵌入示例"即可看到全流程）。
+
+### COEP 说明（重要）
+
+体感游戏需要 `Cross-Origin-Embedder-Policy: require-corp`（MediaPipe 的跨源隔离），
+但它会拦截不带 CORP 头的跨源 iframe。因此：
+
+- 开发：`vite.config.ts` 的 `coepPerRoute()` 插件对 `/games/ext/*` 不注入 COEP，其余路由照旧；
+- 外接游戏页必须**整页跳转**进入（SPA 内导航不会重新取文档，隔离态洗不掉）；
+- 生产 nginx 部署时需同样按 `location /games/ext` 分流（不加 COEP 头），其余 `add_header` 照旧。
 
 ## 已知状态 / 路线图
 

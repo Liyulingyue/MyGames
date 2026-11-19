@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>嵌入示例 · MyGames</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Poppins', 'Microsoft YaHei', sans-serif;
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #451a03 0%, #7c2d12 50%, #9a3412 100%);
+      color: #fff;
+    }
+    .panel {
+      text-align: center; padding: 48px 64px; border-radius: 24px;
+      background: rgba(0,0,0,.35); backdrop-filter: blur(8px);
+      box-shadow: 0 20px 60px rgba(0,0,0,.4);
+    }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    .who { color: #fcd34d; font-weight: 600; margin-bottom: 24px; }
+    #score { font-size: 72px; font-weight: 800; line-height: 1; margin: 16px 0; }
+    #time { color: #fdba74; font-size: 15px; margin-bottom: 24px; }
+    button {
+      font: inherit; font-weight: 700; font-size: 18px; color: #fff; cursor: pointer;
+      padding: 14px 44px; border: none; border-radius: 14px;
+      background: linear-gradient(135deg, #f59e0b, #ea580c);
+      box-shadow: 0 6px 20px rgba(234,88,12,.5);
+    }
+    button:active { transform: scale(.97); }
+    .hint { margin-top: 20px; font-size: 12px; color: #d6d3d1; }
+    code { background: rgba(0,0,0,.3); padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>🧩 嵌入示例</h1>
+    <p class="who">玩家：<span id="who">（等待大厅注入…）</span></p>
+    <div id="score">0</div>
+    <div id="time">10 秒内疯狂点击！</div>
+    <button id="btn">开 始</button>
+    <p class="hint">外部游戏接入演示：只需 <code>&lt;script src="/lobby-embed.js"&gt;</code> + <code>LobbyEmbed.reportScore(n)</code></p>
+  </div>
+
+  <script src="/lobby-embed.js"></script>
+  <script>
+    var score = 0, timeLeft = 10, playing = false
+    var $ = function (id) { return document.getElementById(id) }
+
+    window.addEventListener('lobby:hello', function (e) {
+      $('who').textContent = (e.detail && e.detail.player_name) || '访客'
+    })
+    // 兜底：脚本加载晚于 hello 时直接读
+    if (window.LobbyEmbed && LobbyEmbed.player.name) $('who').textContent = LobbyEmbed.player.name
+
+    function render() { $('score').textContent = score; $('time').textContent = '剩余 ' + timeLeft + ' 秒' }
+
+    $('btn').addEventListener('click', function () {
+      if (playing) { score++; render(); return }
+      // 兜底：hello 可能晚于首帧渲染，开局时再读一次身份
+      if (window.LobbyEmbed && LobbyEmbed.player.name) $('who').textContent = LobbyEmbed.player.name
+      score = 0; timeLeft = 10; playing = true
+      $('btn').textContent = '点我！'
+      var iv = setInterval(function () {
+        timeLeft--; render()
+        if (timeLeft <= 0) {
+          clearInterval(iv); playing = false
+          $('btn').textContent = '再来一轮'
+          $('time').textContent = '成绩 ' + score + ' 分已上报大厅 🎉'
+          if (window.LobbyEmbed) LobbyEmbed.reportScore(score)
+        }
+      }, 1000)
+    })
+    render()
+  </script>
+</body>
+</html>
